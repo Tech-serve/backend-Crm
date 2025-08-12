@@ -52,6 +52,12 @@ const CandidatePatchDTO = z.object({
     ])
     .optional(),
   interviews: z.array(InterviewDTO).optional(),
+
+  polygraphAt: z.string().datetime().optional(),
+  acceptedAt:  z.string().datetime().optional(),
+  declinedAt:  z.string().datetime().optional(),
+  canceledAt:  z.string().datetime().optional(),
+  polygraphAddress: z.string().nullable().optional(),
 });
 
 candidatesRouter.get("/", async (req, res, next) => {

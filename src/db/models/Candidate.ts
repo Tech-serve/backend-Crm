@@ -42,6 +42,11 @@ const candidateSchema = new Schema(
       ],
       default: "Геймблинг",
     },
+    polygraphAt: { type: Date, default: null },
+    acceptedAt:  { type: Date, default: null },
+    declinedAt:  { type: Date, default: null },
+    canceledAt:  { type: Date, default: null },
+    polygraphAddress: { type: String, default: "" },
     interviews: { type: [interviewSubSchema], default: [] },
   },
   { timestamps: true }
