@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-/** ---- Candidates ---- */
 export const CandidateCreateSchema = z.object({
   fullName: z.string().min(1),
   email: z.string().email(),
