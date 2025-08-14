@@ -4,36 +4,6 @@ import { Candidate } from "../db/models/Candidate";
 
 export const candidatesRouter = Router();
 
-/** ---- HR constants (англ. отделы + должности) ---- */
-const DEPARTMENTS = [
-  "Gambling",
-  "Search",
-  "AdminStaff",
-  "Sweeps",
-  "Tech",
-] as const;
-type Department = typeof DEPARTMENTS[number];
-
-const POSITION_MAP: Record<Department, readonly string[]> = {
-  Sweeps: ["Head", "TeamLead", "Buyer", "Designer"],
-  Search: ["Head", "TeamLead", "Buyer", "Designer"],
-  Gambling: ["Head", "TeamLead", "Buyer", "Designer"],
-  AdminStaff: ["Accountant", "Administrator"],
-  Tech: [],
-} as const;
-
-const ALL_POSITIONS = Array.from(
-  new Set(Object.values(POSITION_MAP).flat())
-) as readonly string[];
-
-const isValidPosition = (department?: Department, position?: string) => {
-  if (!position) return true;
-  if (!department) return true;
-  const allowed = POSITION_MAP[department] || [];
-  return allowed.includes(position);
-};
-/** ----------------------------------------------- */
-
 const InterviewDTO = z.object({
   scheduledAt: z.string().datetime(),
   durationMinutes: z.number().int().min(1).max(600).optional(),
@@ -46,28 +16,48 @@ const InterviewDTO = z.object({
   jiraIssueId: z.string().optional(),
 });
 
+const DepartmentEnum = z.enum([
+  "Gambling",
+  "Sweeps",
+  "Search",
+  "Vitehi",
+  "Tech",
+  "TechaDeals",
+  "AdminStaff",
+]);
+
+const PositionEnum = z.enum([
+  "Head",
+  "TeamLead",
+  "Buyer",
+  "Designer",
+  "Accountant",
+  "Administrator",
+  "CTO",
+  "Translator",
+  "Frontend",
+]);
+
 const CandidateCreateDTO = z.object({
   fullName: z.string().min(1),
   email: z.string().email(),
   notes: z.string().optional(),
-  department: z.enum(DEPARTMENTS).optional(),
-  position: z.enum(ALL_POSITIONS as [string, ...string[]]).optional(),
+  department: DepartmentEnum.optional(),
+  position: PositionEnum.optional(),
   interview: InterviewDTO.optional(),
   polygraphAt: z.string().datetime().optional(),
   acceptedAt: z.string().datetime().optional(),
   declinedAt: z.string().datetime().optional(),
   canceledAt: z.string().datetime().optional(),
   polygraphAddress: z.string().optional(),
-}).refine((v) => isValidPosition(v.department as Department | undefined, v.position), {
-  message: "Invalid position for department"
 });
 
 const CandidatePatchDTO = z.object({
   status: z.enum(["not_held","success","declined","canceled","reserve"]).optional(),
   meetLink: z.string().url().optional(),
   notes: z.string().optional(),
-  department: z.enum(DEPARTMENTS).optional(),
-  position: z.enum(ALL_POSITIONS as [string, ...string[]]).optional(),
+  department: DepartmentEnum.optional(),
+  position: z.union([PositionEnum, z.literal(""), z.null()]).optional(),
   interviews: z.array(InterviewDTO).optional(),
   polygraphAt: z.string().datetime().nullable().optional(),
   acceptedAt: z.string().datetime().nullable().optional(),
@@ -76,8 +66,6 @@ const CandidatePatchDTO = z.object({
   polygraphAddress: z.string().nullable().optional(),
   fullName: z.string().min(1).optional(),
   email: z.string().email().optional(),
-}).refine((v) => isValidPosition(v.department as Department | undefined, v.position), {
-  message: "Invalid position for department"
 });
 
 candidatesRouter.get("/", async (req, res, next) => {
@@ -102,7 +90,7 @@ candidatesRouter.post("/", async (req, res, next) => {
       email: body.email,
       notes: body.notes,
       department: body.department,
-      position: body.position,
+      position: body.position ?? null,
       interviews: body.interview ? [body.interview] : [],
       polygraphAt: body.polygraphAt,
       acceptedAt: body.acceptedAt,
@@ -119,8 +107,16 @@ candidatesRouter.post("/", async (req, res, next) => {
 candidatesRouter.patch("/:id", async (req, res, next) => {
   try {
     const body = CandidatePatchDTO.parse(req.body);
-    if (Object.keys(body).length === 0) return res.status(400).json({ error: "Empty body" });
-    const cand = await Candidate.findByIdAndUpdate(req.params.id, body, {
+
+    // приводим "" → null для position
+    const update: any = { ...body };
+    if (Object.prototype.hasOwnProperty.call(update, "position") && update.position === "") {
+      update.position = null;
+    }
+
+    if (Object.keys(update).length === 0) return res.status(400).json({ error: "Empty body" });
+
+    const cand = await Candidate.findByIdAndUpdate(req.params.id, update, {
       new: true,
       runValidators: true,
       context: "query",

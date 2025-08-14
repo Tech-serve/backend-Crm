@@ -4,7 +4,7 @@ export const DEPARTMENTS = [
   "AdminStaff",
   "Sweeps",
   "Vitehi",
-  "TechaDeals",
+  "Tech",
 ] as const;
 export type Department = typeof DEPARTMENTS[number];
 
@@ -14,7 +14,7 @@ export const POSITIONS = {
   Gambling: ["Head", "TeamLead", "Buyer", "Designer"],
   AdminStaff: ["Accountant", "Administrator"],
   Vitehi: [],
-  TechaDeals: ["CTO", "Translator", "Frontend"], // ← ДОБАВЛЕНО
+  Tech: ["CTO", "Translator", "Frontend"], // ← ДОБАВЛЕНО
 } as const;
 
 export type Position = typeof POSITIONS[keyof typeof POSITIONS][number];
