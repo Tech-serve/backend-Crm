@@ -33,7 +33,7 @@ const candidateSchema = new Schema(
 
     department: {
       type: String,
-      enum: ["Gambling", "Sweeps", "Search", "Vitehi", "Tech", "TechaDeals", "AdminStaff"],
+      enum: ["Gambling", "Sweeps", "Search", "Vitehi", "Tech", "TechaDeals", "Admin"],
       default: "Gambling",
     },
 

@@ -1,7 +1,7 @@
 export const DEPARTMENTS = [
   "Gambling",
   "Search",
-  "AdminStaff",
+  "Admin",
   "Sweeps",
   "Vitehi",
   "Tech",
@@ -12,7 +12,7 @@ export const POSITIONS = {
   Sweeps: ["Head", "TeamLead", "Buyer", "Designer"],
   Search: ["Head", "TeamLead", "Buyer", "Designer"],
   Gambling: ["Head", "TeamLead", "Buyer", "Designer"],
-  AdminStaff: ["Accountant", "Administrator"],
+  Admin: ["Accountant", "Administrator"],
   Vitehi: [],
   Tech: ["CTO", "Translator", "Frontend"], // ← ДОБАВЛЕНО
 } as const;

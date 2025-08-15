@@ -23,7 +23,7 @@ const DepartmentEnum = z.enum([
   "Vitehi",
   "Tech",
   "TechaDeals",
-  "AdminStaff",
+  "Admin",
 ]);
 
 const PositionEnum = z.enum([
