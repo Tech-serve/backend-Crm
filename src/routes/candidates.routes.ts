@@ -1,3 +1,4 @@
+// backend/src/routes/candidates.routes.ts
 import { Router } from "express";
 import { z } from "zod";
 import { Candidate } from "../db/models/Candidate";
@@ -41,6 +42,7 @@ const PositionEnum = z.enum([
 const CandidateCreateDTO = z.object({
   fullName: z.string().min(1),
   email: z.string().email(),
+  phone: z.string().optional(),
   notes: z.string().optional(),
   department: DepartmentEnum.optional(),
   position: PositionEnum.optional(),
@@ -55,6 +57,7 @@ const CandidateCreateDTO = z.object({
 const CandidatePatchDTO = z.object({
   status: z.enum(["not_held","success","declined","canceled","reserve"]).optional(),
   meetLink: z.string().url().optional(),
+  phone: z.string().optional(),
   notes: z.string().optional(),
   department: DepartmentEnum.optional(),
   position: z.union([PositionEnum, z.literal(""), z.null()]).optional(),
@@ -88,6 +91,7 @@ candidatesRouter.post("/", async (req, res, next) => {
     const cand = await Candidate.create({
       fullName: body.fullName,
       email: body.email,
+      phone: body.phone ?? "",
       notes: body.notes,
       department: body.department,
       position: body.position ?? null,
@@ -107,15 +111,21 @@ candidatesRouter.post("/", async (req, res, next) => {
 candidatesRouter.patch("/:id", async (req, res, next) => {
   try {
     const body = CandidatePatchDTO.parse(req.body);
-
-    // приводим "" → null для position
+    if (Object.prototype.hasOwnProperty.call(body, "meetLink")) {
+      const cand = await Candidate.findById(req.params.id);
+      if (!cand) return res.status(404).json({ error: "Candidate not found" });
+      cand.meetLink = body.meetLink!;
+      if (cand.interviews && cand.interviews.length > 0) {
+        cand.interviews[0].meetLink = body.meetLink!;
+      }
+      await cand.save();
+      return res.json(cand);
+    }
     const update: any = { ...body };
     if (Object.prototype.hasOwnProperty.call(update, "position") && update.position === "") {
       update.position = null;
     }
-
     if (Object.keys(update).length === 0) return res.status(400).json({ error: "Empty body" });
-
     const cand = await Candidate.findByIdAndUpdate(req.params.id, update, {
       new: true,
       runValidators: true,

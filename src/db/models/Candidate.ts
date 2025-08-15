@@ -1,3 +1,4 @@
+// backend/src/db/models/Candidate.ts
 import { Schema, model, InferSchemaType, Types } from "mongoose";
 
 const interviewSubSchema = new Schema(
@@ -23,6 +24,7 @@ const candidateSchema = new Schema(
   {
     fullName: { type: String, required: true },
     email: { type: String, required: true, unique: true },
+    phone: { type: String, default: "" },
     notes: String,
     status: {
       type: String,
@@ -30,13 +32,11 @@ const candidateSchema = new Schema(
       default: "not_held",
     },
     meetLink: String,
-
     department: {
       type: String,
       enum: ["Gambling", "Sweeps", "Search", "Vitehi", "Tech", "TechaDeals", "Admin"],
       default: "Gambling",
     },
-
     position: {
       type: String,
       enum: [
@@ -53,13 +53,11 @@ const candidateSchema = new Schema(
       default: null,
       set: (v: any) => (v === "" ? null : v),
     },
-
     polygraphAt: { type: Date, default: null },
-    acceptedAt:  { type: Date, default: null },
-    declinedAt:  { type: Date, default: null },
-    canceledAt:  { type: Date, default: null },
+    acceptedAt: { type: Date, default: null },
+    declinedAt: { type: Date, default: null },
+    canceledAt: { type: Date, default: null },
     polygraphAddress: { type: String, default: "" },
-
     interviews: { type: [interviewSubSchema], default: [] },
   },
   { timestamps: true }
