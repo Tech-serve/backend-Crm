@@ -96,6 +96,7 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
   try {
     const body = CandidatePatchDTO.parse(req.body);
 
+    // отдельная ветка для meetLink
     if (Object.prototype.hasOwnProperty.call(body, "meetLink")) {
       const cand = await Candidate.findById(req.params.id);
       if (!cand) return res.status(404).json({ error: "Candidate not found" });
@@ -124,26 +125,40 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
     const statusBefore = candBefore?.status;
     const statusAfter = cand.status;
 
+    // ---- FIX: перенос в employees с обязательными полями ----
     if (statusAfter === "success") {
-      const hiredAt = cand.acceptedAt ?? new Date().toISOString();
+      const hiredAtDate =
+        cand.acceptedAt ? new Date(cand.acceptedAt) : new Date();
+
       await Employee.findOneAndUpdate(
-        { email: cand.email },
+        { email: cand.email.toLowerCase() },
         {
           fullName: cand.fullName,
-          email: cand.email,
+          email: cand.email.toLowerCase(),
           phone: cand.phone || "",
           department: cand.department || "Gambling",
-          position: cand.position || null,
+          position: cand.position ?? null,
           notes: cand.notes || "",
-          hiredAt,
+          hiredAt: hiredAtDate,      // ← Дата, не строка
           birthdayAt: null,
           active: true,
+          candidate: cand._id,       // ← ОБЯЗАТЕЛЬНО
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+        {
+          upsert: true,
+          new: true,
+          runValidators: true,
+          setDefaultsOnInsert: true,
+        }
       );
     } else if (statusBefore === "success") {
-      await Employee.findOneAndUpdate({ email: cand.email }, { active: false });
+      await Employee.findOneAndUpdate(
+        { email: (candBefore?.email || "").toLowerCase() },
+        { active: false },
+        { new: true }
+      );
     }
+    // --------------------------------------------------------
 
     res.json(cand);
   } catch (err: any) {
