@@ -1,7 +1,7 @@
-// backend/src/routes/candidates.routes.ts
 import { Router } from "express";
 import { z } from "zod";
 import { Candidate } from "../db/models/Candidate";
+import { Employee } from "../db/models/Employee";
 
 export const candidatesRouter = Router();
 
@@ -17,26 +17,10 @@ const InterviewDTO = z.object({
   jiraIssueId: z.string().optional(),
 });
 
-const DepartmentEnum = z.enum([
-  "Gambling",
-  "Sweeps",
-  "Search",
-  "Vitehi",
-  "Tech",
-  "TechaDeals",
-  "Admin",
-]);
+const DepartmentEnum = z.enum(["Gambling","Sweeps","Search","Vitehi","Tech","TechaDeals","Admin"]);
 
 const PositionEnum = z.enum([
-  "Head",
-  "TeamLead",
-  "Buyer",
-  "Designer",
-  "Accountant",
-  "Administrator",
-  "CTO",
-  "Translator",
-  "Frontend",
+  "Head","TeamLead","Buyer","Designer","Accountant","Administrator","CTO","Translator","Frontend",
 ]);
 
 const CandidateCreateDTO = z.object({
@@ -111,6 +95,7 @@ candidatesRouter.post("/", async (req, res, next) => {
 candidatesRouter.patch("/:id", async (req, res, next) => {
   try {
     const body = CandidatePatchDTO.parse(req.body);
+
     if (Object.prototype.hasOwnProperty.call(body, "meetLink")) {
       const cand = await Candidate.findById(req.params.id);
       if (!cand) return res.status(404).json({ error: "Candidate not found" });
@@ -121,17 +106,45 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
       await cand.save();
       return res.json(cand);
     }
+
     const update: any = { ...body };
     if (Object.prototype.hasOwnProperty.call(update, "position") && update.position === "") {
       update.position = null;
     }
     if (Object.keys(update).length === 0) return res.status(400).json({ error: "Empty body" });
+
+    const candBefore = await Candidate.findById(req.params.id).lean();
     const cand = await Candidate.findByIdAndUpdate(req.params.id, update, {
       new: true,
       runValidators: true,
       context: "query",
     });
     if (!cand) return res.status(404).json({ error: "Candidate not found" });
+
+    const statusBefore = candBefore?.status;
+    const statusAfter = cand.status;
+
+    if (statusAfter === "success") {
+      const hiredAt = cand.acceptedAt ?? new Date().toISOString();
+      await Employee.findOneAndUpdate(
+        { email: cand.email },
+        {
+          fullName: cand.fullName,
+          email: cand.email,
+          phone: cand.phone || "",
+          department: cand.department || "Gambling",
+          position: cand.position || null,
+          notes: cand.notes || "",
+          hiredAt,
+          birthdayAt: null,
+          active: true,
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } else if (statusBefore === "success") {
+      await Employee.findOneAndUpdate({ email: cand.email }, { active: false });
+    }
+
     res.json(cand);
   } catch (err: any) {
     if (err?.code === 11000) return res.status(409).json({ error: "Email already exists" });

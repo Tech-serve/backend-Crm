@@ -8,6 +8,7 @@ import { apiRouter } from './routes';
 import { authRouter } from './routes/auth';
 import { errorHandler } from './middlewares/errorHandler';
 import { candidatesRouter } from './routes/candidates.routes';
+import { employeesRouter } from './routes/employees.routes';
 
 export function createApp() {
   const app = express();
@@ -35,7 +36,6 @@ export function createApp() {
     next();
   });
 
-  // 2) Всё, как у тебя было
   app.use(helmet());
   app.use(
     cors({
@@ -53,7 +53,8 @@ export function createApp() {
   app.use('/auth', authRouter);
   app.use('/', apiRouter);
 
-  app.use('/candidates', candidatesRouter); 
+  app.use('/candidates', candidatesRouter);
+  app.use('/employees', employeesRouter);
 
   app.use((_req, res) => res.status(404).json({ error: 'Not Found' }));
   app.use(errorHandler);

@@ -67,7 +67,7 @@ candidateSchema.index({ email: 1 });
 candidateSchema.index({ fullName: 1 });
 
 export type InterviewSubDoc = InferSchemaType<typeof interviewSubSchema>;
-export type CandidateDaoc = InferSchemaType<typeof candidateSchema> & {
+export type CandidateDoc = InferSchemaType<typeof candidateSchema> & {
   interviews: Types.DocumentArray<InterviewSubDoc>;
 };
 export const Candidate = model("Candidate", candidateSchema);

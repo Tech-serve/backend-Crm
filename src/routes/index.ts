@@ -2,9 +2,11 @@ import { Router } from 'express';
 import { healthRouter } from './health.routes';
 import { webhooksRouter } from './webhooks.routes';
 import { candidatesRouter } from './candidates.routes';
+import { employeesRouter } from './employees.routes';
 
 export const apiRouter = Router();
 
+apiRouter.use('/candidates', candidatesRouter);
+apiRouter.use('/employees', employeesRouter);
 apiRouter.use(healthRouter);
-apiRouter.use(candidatesRouter);
 apiRouter.use(webhooksRouter);
