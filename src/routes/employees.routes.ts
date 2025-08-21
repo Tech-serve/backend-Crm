@@ -6,25 +6,10 @@ import { Candidate } from "../db/models/Candidate";
 export const employeesRouter = Router();
 
 const DepartmentEnum = z.enum([
-  "Gambling",
-  "Sweeps",
-  "Search",
-  "Vitehi",
-  "Tech",
-  "TechaDeals",
-  "Admin",
+  "Gambling", "Sweeps", "Search", "Vitehi", "Tech", "TechaDeals", "Admin",
 ]);
-
 const PositionEnum = z.enum([
-  "Head",
-  "TeamLead",
-  "Buyer",
-  "Designer",
-  "Accountant",
-  "Administrator",
-  "CTO",
-  "Translator",
-  "Frontend",
+  "Head","TeamLead","Buyer","Designer","Accountant","Administrator","CTO","Translator","Frontend",
 ]);
 
 const normEmail = (e: string) => e.trim().toLowerCase();
@@ -41,7 +26,7 @@ const EmployeeCreateDTO = z.object({
   notes: z.string().optional(),
   birthdayAt: z.string().datetime().nullable().optional(),
   hiredAt: z.string().datetime().optional(),
-  candidateId: z.string().optional(), // можно явно привязать к существующему кандидату
+  candidateId: z.string().optional(), 
 });
 
 const EmployeePatchDTO = z.object({
@@ -78,28 +63,14 @@ employeesRouter.get("/", async (req, res, next) => {
 employeesRouter.post("/", async (req, res, next) => {
   try {
     const body = EmployeeCreateDTO.parse(req.body);
-
     const email = normEmail(body.email);
-    let candidateId = body.candidateId;
 
-    // Если candidateId не передали — ищем/создаём кандидата по email,
-    // чтобы удовлетворить required-ссылку Employee.candidate
-    if (!candidateId) {
-      const existingCand = await Candidate.findOne({ email }).lean();
-      if (existingCand) {
-        candidateId = String(existingCand._id);
-      } else {
-        const cand = await Candidate.create({
-          fullName: body.fullName,
-          email,
-          phone: body.phone ?? "",
-          notes: body.notes ?? "",
-          department: body.department,
-          position: body.position ?? null,
-          acceptedAt: new Date().toISOString(), // логично, раз уже нанят как сотрудник
-        });
-        candidateId = String(cand._id);
-      }
+    // ⚠️ Больше НЕ создаём кандидата автоматически.
+    // Если явно передали candidateId — привяжем, иначе employee живёт сам по себе.
+    let candidateId = body.candidateId || undefined;
+    if (candidateId) {
+      const cand = await Candidate.findById(candidateId).select({ _id: 1 }).lean();
+      if (!cand) candidateId = undefined; // тихо игнорим несуществующий id
     }
 
     const doc = await Employee.findOneAndUpdate(
@@ -112,21 +83,15 @@ employeesRouter.post("/", async (req, res, next) => {
         position: body.position ?? null,
         notes: body.notes ?? "",
         birthdayAt: dateOrNull(body.birthdayAt),
-        hiredAt: body.hiredAt ? new Date(body.hiredAt) : new Date(), // required
+        hiredAt: body.hiredAt ? new Date(body.hiredAt) : new Date(),
         active: true,
-        candidate: candidateId, // required
+        ...(candidateId ? { candidate: candidateId } : {}), // candidate — НЕ обязателен
       },
-      {
-        upsert: true,
-        new: true,
-        runValidators: true,
-        setDefaultsOnInsert: true,
-      }
+      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
     );
 
-    return res.status(201).json(doc);
+    res.status(201).json(doc);
   } catch (err: any) {
-    // На случай гонки по уникальному email
     if (err?.code === 11000) {
       const doc = await Employee.findOne({ email: normEmail(req.body?.email || "") }).lean();
       if (doc) return res.status(200).json(doc);
@@ -151,8 +116,7 @@ employeesRouter.patch("/:id", async (req, res, next) => {
     if (body.notes !== undefined) update.notes = body.notes ?? "";
     if (body.hiredAt !== undefined) update.hiredAt = new Date(body.hiredAt);
     if (body.birthdayAt !== undefined)
-      update.birthdayAt =
-        body.birthdayAt === null ? null : new Date(body.birthdayAt);
+      update.birthdayAt = body.birthdayAt === null ? null : new Date(body.birthdayAt);
 
     const emp = await Employee.findByIdAndUpdate(req.params.id, update, {
       new: true,

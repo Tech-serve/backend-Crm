@@ -2,7 +2,7 @@ import { Schema, model, InferSchemaType, Types } from "mongoose";
 
 const employeeSchema = new Schema(
   {
-    candidate: { type: Schema.Types.ObjectId, ref: "Candidate", unique: true, required: true },
+    candidate: { type: Schema.Types.ObjectId, ref: "Candidate", unique: true, required: false },
     fullName: { type: String, required: true },
     email: { type: String, required: true, index: true },
     phone: { type: String, default: "" },

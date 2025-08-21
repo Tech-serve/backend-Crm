@@ -56,7 +56,6 @@ const CandidatePatchDTO = z.object({
   email: z.string().email().optional(),
 });
 
-/** ЕДИНЫЙ источник истины — поле status. Даты синхронизируем под status. */
 function applyStatusSideEffects(update: any, nowISO: string) {
   if (!update) return;
 
@@ -117,10 +116,8 @@ candidatesRouter.post("/", async (req, res, next) => {
       declinedAt: body.declinedAt,
       canceledAt: body.canceledAt,
       polygraphAddress: body.polygraphAddress,
-      // status при создании можно добавить в DTO при необходимости
     };
 
-    // Синхронизация дат с возможным статусом (если он будет в будущем добавлен в DTO)
     applyStatusSideEffects(doc, nowISO);
 
     const cand = await Candidate.create(doc);
@@ -134,7 +131,6 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
   try {
     const body = CandidatePatchDTO.parse(req.body);
 
-    // отдельная ветка для meetLink
     if (Object.prototype.hasOwnProperty.call(body, "meetLink")) {
       const cand = await Candidate.findById(req.params.id);
       if (!cand) return res.status(404).json({ error: "Candidate not found" });
@@ -152,7 +148,6 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
     }
     if (Object.keys(update).length === 0) return res.status(400).json({ error: "Empty body" });
 
-    // ВЫРАВНИВАЕМ ДАТЫ ПОД STATUS — один источник истины
     applyStatusSideEffects(update, new Date().toISOString());
 
     const candBefore = await Candidate.findById(req.params.id).lean();
@@ -166,7 +161,6 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
     const statusBefore = candBefore?.status;
     const statusAfter = cand.status;
 
-    // перенос в employees — обязательные поля присутствуют
     if (statusAfter === "success") {
       const hiredAtDate = cand.acceptedAt ? new Date(cand.acceptedAt) : new Date();
       await Employee.findOneAndUpdate(
@@ -294,7 +288,6 @@ candidatesRouter.get("/metrics", async (req, res, next) => {
 
 /* ====================== SNAPSHOTS ======================= */
 
-// GET /candidates/snapshots?from=YYYY-MM&to=YYYY-MM
 candidatesRouter.get("/snapshots", async (req, res, next) => {
   try {
     const from = String(req.query.from || "");
@@ -339,7 +332,6 @@ candidatesRouter.post("/snapshots/freeze", async (req, res, next) => {
       return new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
     })();
 
-    // ГРУППИРУЕМ ровно как в таблице: по текущему полю status
     const agg = await Candidate.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]);
 
     const base = { not_held: 0, reserve: 0, success: 0, declined: 0, canceled: 0 } as Record<string, number>;
