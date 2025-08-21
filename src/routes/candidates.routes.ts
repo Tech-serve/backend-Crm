@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { Candidate } from "../db/models/Candidate";
 import { Employee } from "../db/models/Employee";
+import { CandidateSnapshot } from "../db/models/CandidateSnapshot";
 
 export const candidatesRouter = Router();
 
@@ -55,6 +56,35 @@ const CandidatePatchDTO = z.object({
   email: z.string().email().optional(),
 });
 
+/** ЕДИНЫЙ источник истины — поле status. Даты синхронизируем под status. */
+function applyStatusSideEffects(update: any, nowISO: string) {
+  if (!update) return;
+
+  if (Object.prototype.hasOwnProperty.call(update, "status")) {
+    const s = update.status;
+    if (s === "success") {
+      update.acceptedAt = update.acceptedAt ?? nowISO;
+      update.declinedAt = null;
+      update.canceledAt = null;
+    } else if (s === "declined") {
+      update.declinedAt = update.declinedAt ?? nowISO;
+      update.acceptedAt = null;
+      update.canceledAt = null;
+    } else if (s === "canceled") {
+      update.canceledAt = update.canceledAt ?? nowISO;
+      update.acceptedAt = null;
+      update.declinedAt = null;
+    } else if (s === "reserve") {
+      update.polygraphAt = update.polygraphAt ?? nowISO;
+    } else if (s === "not_held") {
+      update.polygraphAt = null;
+      update.acceptedAt = null;
+      update.declinedAt = null;
+      update.canceledAt = null;
+    }
+  }
+}
+
 candidatesRouter.get("/", async (req, res, next) => {
   try {
     const page = Math.max(+req.query.page! || 1, 1);
@@ -72,7 +102,9 @@ candidatesRouter.get("/", async (req, res, next) => {
 candidatesRouter.post("/", async (req, res, next) => {
   try {
     const body = CandidateCreateDTO.parse(req.body);
-    const cand = await Candidate.create({
+    const nowISO = new Date().toISOString();
+
+    const doc: any = {
       fullName: body.fullName,
       email: body.email,
       phone: body.phone ?? "",
@@ -85,7 +117,13 @@ candidatesRouter.post("/", async (req, res, next) => {
       declinedAt: body.declinedAt,
       canceledAt: body.canceledAt,
       polygraphAddress: body.polygraphAddress,
-    });
+      // status при создании можно добавить в DTO при необходимости
+    };
+
+    // Синхронизация дат с возможным статусом (если он будет в будущем добавлен в DTO)
+    applyStatusSideEffects(doc, nowISO);
+
+    const cand = await Candidate.create(doc);
     res.status(201).json(cand);
   } catch (err) {
     next(err);
@@ -114,6 +152,9 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
     }
     if (Object.keys(update).length === 0) return res.status(400).json({ error: "Empty body" });
 
+    // ВЫРАВНИВАЕМ ДАТЫ ПОД STATUS — один источник истины
+    applyStatusSideEffects(update, new Date().toISOString());
+
     const candBefore = await Candidate.findById(req.params.id).lean();
     const cand = await Candidate.findByIdAndUpdate(req.params.id, update, {
       new: true,
@@ -125,11 +166,9 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
     const statusBefore = candBefore?.status;
     const statusAfter = cand.status;
 
-    // ---- FIX: перенос в employees с обязательными полями ----
+    // перенос в employees — обязательные поля присутствуют
     if (statusAfter === "success") {
-      const hiredAtDate =
-        cand.acceptedAt ? new Date(cand.acceptedAt) : new Date();
-
+      const hiredAtDate = cand.acceptedAt ? new Date(cand.acceptedAt) : new Date();
       await Employee.findOneAndUpdate(
         { email: cand.email.toLowerCase() },
         {
@@ -139,17 +178,12 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
           department: cand.department || "Gambling",
           position: cand.position ?? null,
           notes: cand.notes || "",
-          hiredAt: hiredAtDate,      // ← Дата, не строка
+          hiredAt: hiredAtDate,
           birthdayAt: null,
           active: true,
-          candidate: cand._id,       // ← ОБЯЗАТЕЛЬНО
+          candidate: cand._id,
         },
-        {
-          upsert: true,
-          new: true,
-          runValidators: true,
-          setDefaultsOnInsert: true,
-        }
+        { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
       );
     } else if (statusBefore === "success") {
       await Employee.findOneAndUpdate(
@@ -158,7 +192,6 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
         { new: true }
       );
     }
-    // --------------------------------------------------------
 
     res.json(cand);
   } catch (err: any) {
@@ -254,6 +287,76 @@ candidatesRouter.get("/metrics", async (req, res, next) => {
     }));
 
     res.json({ current, monthly: Array.from(monthlyMap.values()), firstTouches });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ====================== SNAPSHOTS ======================= */
+
+// GET /candidates/snapshots?from=YYYY-MM&to=YYYY-MM
+candidatesRouter.get("/snapshots", async (req, res, next) => {
+  try {
+    const from = String(req.query.from || "");
+    const to = String(req.query.to || "");
+
+    const parseYM = (s: string) => {
+      const [y, m] = s.split("-").map(Number);
+      if (!y || !m) return null;
+      return new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
+    };
+
+    const fromMonth = parseYM(from);
+    const toMonth = parseYM(to);
+    if (!fromMonth || !toMonth) return res.json({ items: [] });
+
+    const docs = await CandidateSnapshot.find({ month: { $gte: fromMonth, $lte: toMonth } })
+      .sort({ month: 1 })
+      .lean();
+
+    res.json({
+      items: docs.map((d) => ({
+        month: d.month.toISOString().slice(0, 7),
+        ...d.counts,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /candidates/snapshots/freeze?month=YYYY-MM   (если не передан — предыдущий месяц)
+candidatesRouter.post("/snapshots/freeze", async (req, res, next) => {
+  try {
+    const ym = String(req.query.month || "");
+    const now = new Date();
+    const defaultMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1, 0, 0, 0, 0));
+
+    const month = (() => {
+      if (!ym) return defaultMonth;
+      const [y, m] = ym.split("-").map(Number);
+      if (!y || !m) return defaultMonth;
+      return new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
+    })();
+
+    // ГРУППИРУЕМ ровно как в таблице: по текущему полю status
+    const agg = await Candidate.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]);
+
+    const base = { not_held: 0, reserve: 0, success: 0, declined: 0, canceled: 0 } as Record<string, number>;
+    for (const r of agg) {
+      if (r?._id in base) base[r._id] = r.count || 0;
+    }
+
+    const doc = await CandidateSnapshot.findOneAndUpdate(
+      { month },
+      { month, counts: base },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    res.status(201).json({
+      month: doc.month.toISOString().slice(0, 7),
+      ...doc.counts,
+    });
   } catch (err) {
     next(err);
   }
