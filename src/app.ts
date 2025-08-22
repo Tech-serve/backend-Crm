@@ -11,6 +11,33 @@ import { errorHandler } from './middlewares/errorHandler';
 
 export function createApp() {
   const app = express();
+const allowlist = (env.CORS_ORIGIN || "https://crm.vroo.it.com")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
+
+const corsOptions: cors.CorsOptions = {
+  origin(origin, cb) {
+    if (!origin || allowlist.includes(origin)) return cb(null, true);
+    return cb(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET","HEAD","PUT","PATCH","POST","DELETE","OPTIONS"],
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin as string | undefined;
+  if (origin && allowlist.includes(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Vary", "Origin");
+    res.header("Access-Control-Allow-Credentials", "true");
+  }
+  next();
+});
   app.set('trust proxy', 1);
 
   app.use(helmet());
