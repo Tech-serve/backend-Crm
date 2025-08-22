@@ -2,8 +2,8 @@ name: Deploy backend
 
 on:
   push:
-    branches: [ main ]          # если основная ветка не main, замени
-  workflow_dispatch: {}          # ручной запуск из вкладки Actions
+    branches: [ main ]   # если у тебя другая ветка — замени
+  workflow_dispatch: {}
 
 concurrency:
   group: deploy-backend
@@ -14,32 +14,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: SSH deploy to server
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@v1.0.3
         env:
-          APP_DIR: ${{ secrets.APP_DIR }}              # /opt/crm
-          BRANCH:  ${{ secrets.BACKEND_BRANCH }}       # main (или твоя ветка)
+          APP_DIR:  ${{ secrets.APP_DIR }}              # /opt/crm
+          BRANCH:   ${{ secrets.BACKEND_BRANCH }}       # main (или твоя)
+          REPO_URL: ${{ secrets.BACKEND_REPO_URL }}     # https://github.com/Tech-serve/backend-Crm.git (по умолч.)
         with:
-          host:     ${{ secrets.SSH_HOST }}            # 91.215.87.166
-          username: ${{ secrets.SSH_USER }}            # root
-          key:      ${{ secrets.SSH_KEY_CRM_CI }}      # приватный ключ
-          port:     ${{ secrets.SSH_PORT || '22' }}
-          script_stop: true
+          host:     ${{ secrets.SSH_HOST }}             # 91.215.87.166
+          username: ${{ secrets.SSH_USER }}             # root
+          key:      ${{ secrets.SSH_KEY_CRM_CI }}       # приватный ключ crm_ci
+          # port:   22                                  # по умолчанию 22 — можно не указывать
           script: |
             set -euo pipefail
             APP_DIR="${APP_DIR:-/opt/crm}"
             BRANCH="${BRANCH:-main}"
+            REPO_URL="${REPO_URL:-https://github.com/Tech-serve/backend-Crm.git}"
 
-            echo "==> sync repo"
-            cd "$APP_DIR/backend"
-            git fetch origin "$BRANCH"
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
+            # бережно сохраняем .env, если он есть
+            [ -f backend/.env ] && cp backend/.env /tmp/backend.env.back || true
+
+            if [ ! -d backend/.git ]; then
+              rm -rf backend
+              git clone --depth 1 "$REPO_URL" backend
+            fi
+
+            cd backend
+            git fetch --depth 1 origin "$BRANCH"
             git reset --hard "origin/$BRANCH"
 
-            echo "==> rebuild and restart api"
+            # возвращаем .env (если был)
+            [ -f /tmp/backend.env.back ] && mv /tmp/backend.env.back .env || true
+
+            # сборка и рестарт api
             cd "$APP_DIR"
             docker compose build api
-            docker compose up -d api
+            docker compose up -d mongo api
 
-            echo "==> healthcheck"
+            # healthcheck
             docker compose exec -T api wget -qO- http://localhost:3000/health >/dev/null
-
             echo "✅ Backend deployed"
