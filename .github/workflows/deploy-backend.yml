@@ -1,0 +1,45 @@
+name: Deploy backend
+
+on:
+  push:
+    branches: [ main ]          # если основная ветка не main, замени
+  workflow_dispatch: {}          # ручной запуск из вкладки Actions
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH deploy to server
+        uses: appleboy/ssh-action@v1
+        env:
+          APP_DIR: ${{ secrets.APP_DIR }}              # /opt/crm
+          BRANCH:  ${{ secrets.BACKEND_BRANCH }}       # main (или твоя ветка)
+        with:
+          host:     ${{ secrets.SSH_HOST }}            # 91.215.87.166
+          username: ${{ secrets.SSH_USER }}            # root
+          key:      ${{ secrets.SSH_KEY_CRM_CI }}      # приватный ключ
+          port:     ${{ secrets.SSH_PORT || '22' }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            APP_DIR="${APP_DIR:-/opt/crm}"
+            BRANCH="${BRANCH:-main}"
+
+            echo "==> sync repo"
+            cd "$APP_DIR/backend"
+            git fetch origin "$BRANCH"
+            git reset --hard "origin/$BRANCH"
+
+            echo "==> rebuild and restart api"
+            cd "$APP_DIR"
+            docker compose build api
+            docker compose up -d api
+
+            echo "==> healthcheck"
+            docker compose exec -T api wget -qO- http://localhost:3000/health >/dev/null
+
+            echo "✅ Backend deployed"
