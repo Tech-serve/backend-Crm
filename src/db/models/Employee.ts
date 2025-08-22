@@ -18,7 +18,9 @@ const employeeSchema = new Schema(
       default: null
     },
     notes: { type: String, default: "" },
-    hiredAt: { type: Date, required: true }
+    hiredAt: { type: Date, required: true },
+
+    terminatedAt: { type: Date, default: null }, 
   },
   { timestamps: true },
 );

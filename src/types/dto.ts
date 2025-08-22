@@ -28,7 +28,7 @@ export const InterviewCreateSchema = z.object({
     fullName: z.string().min(1),
     email: z.string().email()
   }).optional(),
-  scheduledAt: z.string().datetime(), // ISO
+  scheduledAt: z.string().datetime(),
   durationMinutes: z.number().int().min(1).max(600).optional(),
   participants: z.array(z.string().email()).optional(),
   meetLink: z.string().url().optional(),

@@ -26,7 +26,8 @@ const EmployeeCreateDTO = z.object({
   notes: z.string().optional(),
   birthdayAt: z.string().datetime().nullable().optional(),
   hiredAt: z.string().datetime().optional(),
-  candidateId: z.string().optional(), 
+  candidateId: z.string().optional(),
+  terminatedAt: z.string().datetime().nullable().optional(),
 });
 
 const EmployeePatchDTO = z.object({
@@ -38,6 +39,7 @@ const EmployeePatchDTO = z.object({
   notes: z.string().optional(),
   hiredAt: z.string().datetime().optional(),
   birthdayAt: z.string().datetime().nullable().optional(),
+  terminatedAt: z.string().datetime().nullable().optional(),
 });
 
 // ---------- GET /employees ----------
@@ -84,6 +86,7 @@ employeesRouter.post("/", async (req, res, next) => {
         notes: body.notes ?? "",
         birthdayAt: dateOrNull(body.birthdayAt),
         hiredAt: body.hiredAt ? new Date(body.hiredAt) : new Date(),
+        terminatedAt: dateOrNull(body.terminatedAt),
         active: true,
         ...(candidateId ? { candidate: candidateId } : {}), // candidate — НЕ обязателен
       },
@@ -117,6 +120,8 @@ employeesRouter.patch("/:id", async (req, res, next) => {
     if (body.hiredAt !== undefined) update.hiredAt = new Date(body.hiredAt);
     if (body.birthdayAt !== undefined)
       update.birthdayAt = body.birthdayAt === null ? null : new Date(body.birthdayAt);
+    if (body.terminatedAt !== undefined)
+      update.terminatedAt = body.terminatedAt === null ? null : new Date(body.terminatedAt);
 
     const emp = await Employee.findByIdAndUpdate(req.params.id, update, {
       new: true,
