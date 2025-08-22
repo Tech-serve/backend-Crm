@@ -15,6 +15,12 @@ const PositionEnum = z.enum([
 const normEmail = (e: string) => e.trim().toLowerCase();
 const dateOrNull = (v: unknown) =>
   v === null || v === undefined || v === "" ? null : new Date(String(v));
+const normalizeDateOnly = (v: unknown) => {
+  const d = dateOrNull(v);
+  if (!d) return null;
+  d.setUTCHours(12, 0, 0, 0);
+  return d;
+};
 
 // ---------- DTO ----------
 const EmployeeCreateDTO = z.object({
@@ -49,6 +55,7 @@ employeesRouter.get("/", async (req, res, next) => {
     const pageSize = Math.min(Math.max(+req.query.pageSize! || 50, 1), 200);
     const [items, total] = await Promise.all([
       Employee.find()
+        .select("_id candidate fullName email phone department position notes hiredAt birthdayAt terminatedAt createdAt updatedAt")
         .sort({ createdAt: -1 })
         .skip((page - 1) * pageSize)
         .limit(pageSize)
@@ -67,13 +74,15 @@ employeesRouter.post("/", async (req, res, next) => {
     const body = EmployeeCreateDTO.parse(req.body);
     const email = normEmail(body.email);
 
-    // ⚠️ Больше НЕ создаём кандидата автоматически.
     // Если явно передали candidateId — привяжем, иначе employee живёт сам по себе.
     let candidateId = body.candidateId || undefined;
     if (candidateId) {
       const cand = await Candidate.findById(candidateId).select({ _id: 1 }).lean();
-      if (!cand) candidateId = undefined; // тихо игнорим несуществующий id
+      if (!cand) candidateId = undefined;
     }
+
+    const now = new Date();
+    now.setUTCHours(12, 0, 0, 0);
 
     const doc = await Employee.findOneAndUpdate(
       { email },
@@ -84,11 +93,10 @@ employeesRouter.post("/", async (req, res, next) => {
         department: body.department,
         position: body.position ?? null,
         notes: body.notes ?? "",
-        birthdayAt: dateOrNull(body.birthdayAt),
-        hiredAt: body.hiredAt ? new Date(body.hiredAt) : new Date(),
-        terminatedAt: dateOrNull(body.terminatedAt),
-        active: true,
-        ...(candidateId ? { candidate: candidateId } : {}), // candidate — НЕ обязателен
+        birthdayAt: normalizeDateOnly(body.birthdayAt),
+        hiredAt: body.hiredAt ? normalizeDateOnly(body.hiredAt)! : now,
+        terminatedAt: normalizeDateOnly(body.terminatedAt),
+        ...(candidateId ? { candidate: candidateId } : {}),
       },
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
     );
@@ -117,11 +125,9 @@ employeesRouter.patch("/:id", async (req, res, next) => {
     if (body.department !== undefined) update.department = body.department;
     if (body.position !== undefined) update.position = body.position ?? null;
     if (body.notes !== undefined) update.notes = body.notes ?? "";
-    if (body.hiredAt !== undefined) update.hiredAt = new Date(body.hiredAt);
-    if (body.birthdayAt !== undefined)
-      update.birthdayAt = body.birthdayAt === null ? null : new Date(body.birthdayAt);
-    if (body.terminatedAt !== undefined)
-      update.terminatedAt = body.terminatedAt === null ? null : new Date(body.terminatedAt);
+    if (body.hiredAt !== undefined) update.hiredAt = normalizeDateOnly(body.hiredAt)!;
+    if (body.birthdayAt !== undefined) update.birthdayAt = normalizeDateOnly(body.birthdayAt);
+    if (body.terminatedAt !== undefined) update.terminatedAt = normalizeDateOnly(body.terminatedAt);
 
     const emp = await Employee.findByIdAndUpdate(req.params.id, update, {
       new: true,

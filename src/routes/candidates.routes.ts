@@ -19,7 +19,6 @@ const InterviewDTO = z.object({
 });
 
 const DepartmentEnum = z.enum(["Gambling","Sweeps","Search","Vitehi","Tech","TechaDeals","Admin"]);
-
 const PositionEnum = z.enum([
   "Head","TeamLead","Buyer","Designer","Accountant","Administrator","CTO","Translator","Frontend",
 ]);
@@ -163,6 +162,7 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
 
     if (statusAfter === "success") {
       const hiredAtDate = cand.acceptedAt ? new Date(cand.acceptedAt) : new Date();
+      hiredAtDate.setUTCHours(12,0,0,0);
       await Employee.findOneAndUpdate(
         { email: cand.email.toLowerCase() },
         {
@@ -174,17 +174,12 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
           notes: cand.notes || "",
           hiredAt: hiredAtDate,
           birthdayAt: null,
-          active: true,
           candidate: cand._id,
         },
         { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
       );
     } else if (statusBefore === "success") {
-      await Employee.findOneAndUpdate(
-        { email: (candBefore?.email || "").toLowerCase() },
-        { active: false },
-        { new: true }
-      );
+      // active-поле отсутствует в схеме Employee — лишние апдейты не делаем
     }
 
     res.json(cand);
@@ -318,7 +313,7 @@ candidatesRouter.get("/snapshots", async (req, res, next) => {
   }
 });
 
-// POST /candidates/snapshots/freeze?month=YYYY-MM   (если не передан — предыдущий месяц)
+// POST /candidates/snapshots/freeze?month=YYYY-MM
 candidatesRouter.post("/snapshots/freeze", async (req, res, next) => {
   try {
     const ym = String(req.query.month || "");

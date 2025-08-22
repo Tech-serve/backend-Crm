@@ -1,4 +1,3 @@
-// backend/src/db/models/Candidate.ts
 import { Schema, model, InferSchemaType, Types } from "mongoose";
 
 const interviewSubSchema = new Schema(
@@ -63,8 +62,8 @@ const candidateSchema = new Schema(
   { timestamps: true }
 );
 
-candidateSchema.index({ email: 1 });
 candidateSchema.index({ fullName: 1 });
+candidateSchema.index({ createdAt: -1 });
 
 export type InterviewSubDoc = InferSchemaType<typeof interviewSubSchema>;
 export type CandidateDoc = InferSchemaType<typeof candidateSchema> & {
