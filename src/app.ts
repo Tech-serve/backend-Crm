@@ -11,6 +11,7 @@ import { errorHandler } from './middlewares/errorHandler';
 
 export function createApp() {
   const app = express();
+
   app.set('trust proxy', 1);
 
   const allowlist = (env.CORS_ORIGIN ?? 'https://crm.vroo.it.com')
@@ -31,7 +32,7 @@ export function createApp() {
   };
 
   app.use(cors(corsOptions));
-  app.options('*', cors(corsOptions));
+  app.options('/(.*)', cors(corsOptions));
 
   app.use(helmet());
   app.use(compression());
