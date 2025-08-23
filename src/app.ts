@@ -26,13 +26,13 @@ export function createApp() {
       return cb(new Error('Not allowed by CORS'));
     },
     credentials: true,
-    methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     optionsSuccessStatus: 204,
   };
 
   app.use(cors(corsOptions));
-  app.options('/(.*)', cors(corsOptions));
+  app.options('(.*)', cors(corsOptions));
 
   app.use(helmet());
   app.use(compression());
