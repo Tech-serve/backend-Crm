@@ -1,4 +1,3 @@
-// src/routes/webhooks.routes.ts
 import { Router } from 'express';
 import { z } from 'zod';
 import { Candidate } from '../db/models/Candidate';
@@ -38,39 +37,45 @@ function buildInterview(p: z.infer<typeof JiraPayload>) {
 
 /* --- POST /webhooks/jira ------------------------------------------------------ */
 
-webhooksRouter.post('/webhooks/jira', async (req, res, next) => {
-  try {
-    const data = JiraPayload.parse(req.body);
+webhooksRouter.post('/webhooks/jira', async (req, res) => {
+  // Чёткая диагностика входа (не «немой» 500)
+  const parsed = JiraPayload.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ ok: false, type: 'zod', issues: parsed.error.issues });
+  }
+  const data = parsed.data;
 
-    /* 1. находим / создаём кандидата по email */
-    const cand = await Candidate.findOneAndUpdate(
+  try {
+    const cand: any = await Candidate.findOneAndUpdate(
       { email: data.candidate.email },
       {
         $setOnInsert: {
           fullName: data.candidate.fullName || data.candidate.email.split('@')[0],
         },
       },
-      { new: true, upsert: true }
+      { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 
-    /* 2. ищем внутри interviews запись с таким jiraIssueId */
-    const existing = cand.interviews.find(iv => iv.jiraIssueId === data.issueId);
+    if (!Array.isArray(cand.interviews)) {
+      cand.interviews = [];
+    }
+
+    const existing = cand.interviews.find((iv: any) => iv.jiraIssueId === data.issueId);
 
     if (existing) {
-      // обновляем поля
       existing.scheduledAt           = new Date(data.scheduledAt);
       existing.participants          = data.participants;
       existing.meetLink              = data.meetLink;
       existing.googleCalendarEventId = data.googleCalendarEventId;
       existing.notes                 = data.summary;
     } else {
-      // пушим новое интервью
       cand.interviews.push(buildInterview(data));
     }
 
     await cand.save();
-    res.json({ ok: true, candidate: cand });
-  } catch (err) {
-    next(err);
+    return res.json({ ok: true, candidate: { _id: cand._id, email: cand.email } });
+  } catch (err: any) {
+    console.error('WEBHOOK/JIRA ERROR', err?.message || err);
+    return res.status(500).json({ ok: false, type: 'server', error: String(err?.message || err) });
   }
 });
