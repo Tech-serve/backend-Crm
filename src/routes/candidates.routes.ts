@@ -8,14 +8,12 @@ export const candidatesRouter = Router();
 
 /* ====================== DTOs ======================= */
 
-const StatusEnum = z.enum(["not_held","reserve","success","declined","canceled"]);
-
 const InterviewDTO = z.object({
   scheduledAt: z.string().datetime(),
   durationMinutes: z.number().int().min(1).max(600).optional(),
   participants: z.array(z.string().email()).optional(),
   meetLink: z.string().url().optional(),
-  status: StatusEnum.optional(),
+  status: z.enum(["not_held", "success", "declined", "canceled", "reserve"]).optional(),
   source: z.enum(["jira", "crm"]).optional(),
   notes: z.string().optional(),
   googleCalendarEventId: z.string().optional(),
@@ -27,6 +25,8 @@ const PositionEnum = z.enum([
   "Head","TeamLead","Buyer","Designer","Accountant","Administrator","CTO","Translator","Frontend",
 ]);
 
+const StatusEnum = z.enum(["not_held","reserve","success","declined","canceled"]); // not_held = “в процессе”
+
 const CandidateCreateDTO = z.object({
   fullName: z.string().min(1),
   email: z.string().email(),
@@ -34,8 +34,8 @@ const CandidateCreateDTO = z.object({
   notes: z.string().optional(),
   department: DepartmentEnum.optional(),
   position: PositionEnum.optional(),
-  status: StatusEnum.optional(), // ← позволяем прислать статус при создании
-  interview: InterviewDTO.optional(),
+  status: StatusEnum.optional(),          // 👈 теперь принимаем статус при создании
+  interview: InterviewDTO.optional(),     // 👈 можно слать первое событие
   polygraphAt: z.string().datetime().optional(),
   acceptedAt: z.string().datetime().optional(),
   declinedAt: z.string().datetime().optional(),
@@ -66,7 +66,7 @@ function applyStatusSideEffects(update: any, nowISO: string) {
   if (!update) return;
   if (!Object.prototype.hasOwnProperty.call(update, "status")) return;
 
-  const s = update.status as z.infer<typeof StatusEnum>;
+  const s: z.infer<typeof StatusEnum> = update.status;
   if (s === "success") {
     update.acceptedAt = update.acceptedAt ?? nowISO;
     update.declinedAt = null;
@@ -80,9 +80,10 @@ function applyStatusSideEffects(update: any, nowISO: string) {
     update.acceptedAt = null;
     update.declinedAt = null;
   } else if (s === "reserve") {
-    // КЛЮЧЕВОЕ: при “в процессе” проставляем сегодняшнюю дату
-    update.polygraphAt = update.polygraphAt ?? nowISO;
+    // “полиграф” — оставляем как есть, НИЧЕГО не ставим автоматически на POST
+    // (polygraphAt будем ставить руками из UI, когда нужно)
   } else if (s === "not_held") {
+    // “в процессе” — специальных верхнеуровневых дат нет
     update.polygraphAt = null;
     update.acceptedAt = null;
     update.declinedAt = null;
@@ -118,8 +119,7 @@ candidatesRouter.post("/", async (req, res, next) => {
       notes: body.notes,
       department: body.department,
       position: body.position ?? null,
-      // статус: если не прислали — по дефолту “в процессе”
-      status: body.status ?? "reserve",
+      status: body.status ?? "not_held",              // 👈 по умолчанию “в процессе”
       interviews: body.interview ? [body.interview] : [],
       polygraphAt: body.polygraphAt ?? null,
       acceptedAt: body.acceptedAt ?? null,
@@ -128,7 +128,16 @@ candidatesRouter.post("/", async (req, res, next) => {
       polygraphAddress: body.polygraphAddress ?? "",
     };
 
-    // Сайд-эффекты дат по статусу (для "reserve" поставит сегодняшнюю дату)
+    // ВАЖНО: при создании “в процессе” сразу проставляем событие в interviews
+    if (doc.status === "not_held" && doc.interviews.length === 0) {
+      doc.interviews.push({
+        scheduledAt: nowISO,
+        status: "not_held",
+        source: "crm",
+      });
+    }
+
+    // На POST не трогаем polygraphAt/acceptedAt и т.п. автоматически
     applyStatusSideEffects(doc, nowISO);
 
     const cand = await Candidate.create(doc);
@@ -158,7 +167,12 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
     }
     if (Object.keys(update).length === 0) return res.status(400).json({ error: "Empty body" });
 
-    applyStatusSideEffects(update, new Date().toISOString());
+    const nowISO = new Date().toISOString();
+    // если переводят В “в процессе” и нет события — добавим первое событие
+    if (update.status === "not_held") {
+      update.$setOnInsert = update.$setOnInsert || {};
+    }
+    applyStatusSideEffects(update, nowISO);
 
     const candBefore = await Candidate.findById(req.params.id).lean();
     const cand = await Candidate.findByIdAndUpdate(req.params.id, update, {
@@ -168,7 +182,6 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
     });
     if (!cand) return res.status(404).json({ error: "Candidate not found" });
 
-    // фиксим TS2367 через флаги
     const wasSuccess = candBefore?.status === "success";
     const isSuccess  = cand.status === "success";
     const emailLC    = (cand.email || "").toLowerCase();
@@ -176,6 +189,7 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
     if (isSuccess) {
       const hiredAtDate = cand.acceptedAt ? new Date(cand.acceptedAt) : new Date();
       hiredAtDate.setUTCHours(12, 0, 0, 0);
+
       await Employee.findOneAndUpdate(
         { $or: [{ candidate: cand._id }, { email: emailLC }] },
         {
@@ -205,7 +219,7 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
   }
 });
 
-/* ====================== METRICS ======================= */
+/* ====================== METRICS & SNAPSHOTS — без изменений ======================= */
 
 candidatesRouter.get("/metrics", async (req, res, next) => {
   try {
@@ -214,7 +228,7 @@ candidatesRouter.get("/metrics", async (req, res, next) => {
     const to = req.query.to ? new Date(String(req.query.to)) : new Date("2999-12-31");
 
     type EventKey = "polygraph" | "accepted" | "declined" | "canceled";
-    type StatusKey = z.infer<typeof StatusEnum>;
+    type StatusKey = "not_held" | "reserve" | "success" | "declined" | "canceled";
     type FacetResult = {
       current: { _id: StatusKey; count: number }[];
       monthly: { _id: { event: EventKey; month: Date }; count: number }[];
@@ -287,8 +301,6 @@ candidatesRouter.get("/metrics", async (req, res, next) => {
   }
 });
 
-/* ====================== SNAPSHOTS ======================= */
-
 candidatesRouter.get("/snapshots", async (req, res, next) => {
   try {
     const from = String(req.query.from || "");
@@ -319,7 +331,6 @@ candidatesRouter.get("/snapshots", async (req, res, next) => {
   }
 });
 
-// POST /candidates/snapshots/freeze?month=YYYY-MM
 candidatesRouter.post("/snapshots/freeze", async (req, res, next) => {
   try {
     const ym = String(req.query.month || "");
