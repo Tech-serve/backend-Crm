@@ -6,12 +6,16 @@ import { CandidateSnapshot } from "../db/models/CandidateSnapshot";
 
 export const candidatesRouter = Router();
 
+/* ====================== DTOs ======================= */
+
+const StatusEnum = z.enum(["not_held","reserve","success","declined","canceled"]);
+
 const InterviewDTO = z.object({
   scheduledAt: z.string().datetime(),
   durationMinutes: z.number().int().min(1).max(600).optional(),
   participants: z.array(z.string().email()).optional(),
   meetLink: z.string().url().optional(),
-  status: z.enum(["not_held", "success", "declined", "canceled", "reserve"]).optional(),
+  status: StatusEnum.optional(),
   source: z.enum(["jira", "crm"]).optional(),
   notes: z.string().optional(),
   googleCalendarEventId: z.string().optional(),
@@ -30,6 +34,7 @@ const CandidateCreateDTO = z.object({
   notes: z.string().optional(),
   department: DepartmentEnum.optional(),
   position: PositionEnum.optional(),
+  status: StatusEnum.optional(), // ← позволяем прислать статус при создании
   interview: InterviewDTO.optional(),
   polygraphAt: z.string().datetime().optional(),
   acceptedAt: z.string().datetime().optional(),
@@ -39,7 +44,7 @@ const CandidateCreateDTO = z.object({
 });
 
 const CandidatePatchDTO = z.object({
-  status: z.enum(["not_held","success","declined","canceled","reserve"]).optional(),
+  status: StatusEnum.optional(),
   meetLink: z.string().url().optional(),
   phone: z.string().optional(),
   notes: z.string().optional(),
@@ -55,33 +60,37 @@ const CandidatePatchDTO = z.object({
   email: z.string().email().optional(),
 });
 
+/* =============== helpers =============== */
+
 function applyStatusSideEffects(update: any, nowISO: string) {
   if (!update) return;
+  if (!Object.prototype.hasOwnProperty.call(update, "status")) return;
 
-  if (Object.prototype.hasOwnProperty.call(update, "status")) {
-    const s = update.status;
-    if (s === "success") {
-      update.acceptedAt = update.acceptedAt ?? nowISO;
-      update.declinedAt = null;
-      update.canceledAt = null;
-    } else if (s === "declined") {
-      update.declinedAt = update.declinedAt ?? nowISO;
-      update.acceptedAt = null;
-      update.canceledAt = null;
-    } else if (s === "canceled") {
-      update.canceledAt = update.canceledAt ?? nowISO;
-      update.acceptedAt = null;
-      update.declinedAt = null;
-    } else if (s === "reserve") {
-      update.polygraphAt = update.polygraphAt ?? nowISO;
-    } else if (s === "not_held") {
-      update.polygraphAt = null;
-      update.acceptedAt = null;
-      update.declinedAt = null;
-      update.canceledAt = null;
-    }
+  const s = update.status as z.infer<typeof StatusEnum>;
+  if (s === "success") {
+    update.acceptedAt = update.acceptedAt ?? nowISO;
+    update.declinedAt = null;
+    update.canceledAt = null;
+  } else if (s === "declined") {
+    update.declinedAt = update.declinedAt ?? nowISO;
+    update.acceptedAt = null;
+    update.canceledAt = null;
+  } else if (s === "canceled") {
+    update.canceledAt = update.canceledAt ?? nowISO;
+    update.acceptedAt = null;
+    update.declinedAt = null;
+  } else if (s === "reserve") {
+    // КЛЮЧЕВОЕ: при “в процессе” проставляем сегодняшнюю дату
+    update.polygraphAt = update.polygraphAt ?? nowISO;
+  } else if (s === "not_held") {
+    update.polygraphAt = null;
+    update.acceptedAt = null;
+    update.declinedAt = null;
+    update.canceledAt = null;
   }
 }
+
+/* ====================== CRUD ======================= */
 
 candidatesRouter.get("/", async (req, res, next) => {
   try {
@@ -109,14 +118,17 @@ candidatesRouter.post("/", async (req, res, next) => {
       notes: body.notes,
       department: body.department,
       position: body.position ?? null,
+      // статус: если не прислали — по дефолту “в процессе”
+      status: body.status ?? "reserve",
       interviews: body.interview ? [body.interview] : [],
-      polygraphAt: body.polygraphAt,
-      acceptedAt: body.acceptedAt,
-      declinedAt: body.declinedAt,
-      canceledAt: body.canceledAt,
-      polygraphAddress: body.polygraphAddress,
+      polygraphAt: body.polygraphAt ?? null,
+      acceptedAt: body.acceptedAt ?? null,
+      declinedAt: body.declinedAt ?? null,
+      canceledAt: body.canceledAt ?? null,
+      polygraphAddress: body.polygraphAddress ?? "",
     };
 
+    // Сайд-эффекты дат по статусу (для "reserve" поставит сегодняшнюю дату)
     applyStatusSideEffects(doc, nowISO);
 
     const cand = await Candidate.create(doc);
@@ -130,13 +142,12 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
   try {
     const body = CandidatePatchDTO.parse(req.body);
 
+    // быстрый апдейт meetLink
     if (Object.prototype.hasOwnProperty.call(body, "meetLink")) {
       const cand = await Candidate.findById(req.params.id);
       if (!cand) return res.status(404).json({ error: "Candidate not found" });
       cand.meetLink = body.meetLink!;
-      if (cand.interviews && cand.interviews.length > 0) {
-        cand.interviews[0].meetLink = body.meetLink!;
-      }
+      if (cand.interviews?.length) cand.interviews[0].meetLink = body.meetLink!;
       await cand.save();
       return res.json(cand);
     }
@@ -157,17 +168,19 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
     });
     if (!cand) return res.status(404).json({ error: "Candidate not found" });
 
-    const statusBefore = candBefore?.status;
-    const statusAfter = cand.status;
+    // фиксим TS2367 через флаги
+    const wasSuccess = candBefore?.status === "success";
+    const isSuccess  = cand.status === "success";
+    const emailLC    = (cand.email || "").toLowerCase();
 
-    if (statusAfter === "success") {
+    if (isSuccess) {
       const hiredAtDate = cand.acceptedAt ? new Date(cand.acceptedAt) : new Date();
-      hiredAtDate.setUTCHours(12,0,0,0);
+      hiredAtDate.setUTCHours(12, 0, 0, 0);
       await Employee.findOneAndUpdate(
-        { email: cand.email.toLowerCase() },
+        { $or: [{ candidate: cand._id }, { email: emailLC }] },
         {
           fullName: cand.fullName,
-          email: cand.email.toLowerCase(),
+          email: emailLC,
           phone: cand.phone || "",
           department: cand.department || "Gambling",
           position: cand.position ?? null,
@@ -178,8 +191,11 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
         },
         { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
       );
-    } else if (statusBefore === "success") {
-      // active-поле отсутствует в схеме Employee — лишние апдейты не делаем
+    } else if (wasSuccess && !isSuccess) {
+      const byCandidate = await Employee.deleteOne({ candidate: cand._id });
+      if (byCandidate.deletedCount === 0 && emailLC) {
+        await Employee.deleteOne({ email: emailLC });
+      }
     }
 
     res.json(cand);
@@ -189,6 +205,8 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
   }
 });
 
+/* ====================== METRICS ======================= */
+
 candidatesRouter.get("/metrics", async (req, res, next) => {
   try {
     const tz = "Europe/Kyiv";
@@ -196,7 +214,7 @@ candidatesRouter.get("/metrics", async (req, res, next) => {
     const to = req.query.to ? new Date(String(req.query.to)) : new Date("2999-12-31");
 
     type EventKey = "polygraph" | "accepted" | "declined" | "canceled";
-    type StatusKey = "not_held" | "reserve" | "success" | "declined" | "canceled";
+    type StatusKey = z.infer<typeof StatusEnum>;
     type FacetResult = {
       current: { _id: StatusKey; count: number }[];
       monthly: { _id: { event: EventKey; month: Date }; count: number }[];
@@ -247,27 +265,15 @@ candidatesRouter.get("/metrics", async (req, res, next) => {
       },
     ])) as [FacetResult];
 
-    const current: Record<StatusKey, number> = {
-      not_held: 0,
-      reserve: 0,
-      success: 0,
-      declined: 0,
-      canceled: 0,
-    };
+    const current: Record<StatusKey, number> = { not_held: 0, reserve: 0, success: 0, declined: 0, canceled: 0 };
     for (const r of result.current) current[r._id] = r.count;
 
-    const monthlyMap = new Map<
-      string,
-      { month: string; polygraph: number; accepted: number; declined: number; canceled: number }
-    >();
+    const monthlyMap = new Map<string, { month: string; polygraph: number; accepted: number; declined: number; canceled: number }>();
     for (const r of result.monthly) {
       const m = r._id.month.toISOString().slice(0, 7);
-      if (!monthlyMap.has(m)) {
-        monthlyMap.set(m, { month: m, polygraph: 0, accepted: 0, declined: 0, canceled: 0 });
-      }
-      const key: EventKey = r._id.event;
-      const bucket = monthlyMap.get(m)!;
-      bucket[key] = r.count;
+      if (!monthlyMap.has(m)) monthlyMap.set(m, { month: m, polygraph: 0, accepted: 0, declined: 0, canceled: 0 });
+      const key = r._id.event as EventKey;
+      monthlyMap.get(m)![key] = r.count;
     }
 
     const firstTouches = result.firstTouches.map((r) => ({
