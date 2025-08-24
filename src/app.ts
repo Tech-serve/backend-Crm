@@ -9,6 +9,7 @@ import { env } from './config/env';
 import { apiRouter } from './routes';
 import { authRouter } from './routes/auth';
 import { errorHandler } from './middlewares/errorHandler';
+import os from 'os';
 
 export function createApp() {
   const app = express();
@@ -45,6 +46,14 @@ export function createApp() {
   app.use((_req, res) => res.status(404).json({ error: 'Not Found' }));
 
   app.use(errorHandler);
+
+  app.get('/__whoami', (_req, res) => {
+    res.json({
+      host: os.hostname(),
+      pid: process.pid,
+      startedAt: new Date().toISOString()
+    });
+  });
 
   return app;
 }
