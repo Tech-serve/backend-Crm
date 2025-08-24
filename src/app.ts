@@ -9,7 +9,6 @@ import { env } from './config/env';
 import { apiRouter } from './routes';
 import { authRouter } from './routes/auth';
 import { errorHandler } from './middlewares/errorHandler';
-import { meetRouter } from './routes/meet.routes';
 
 export function createApp() {
   const app = express();
@@ -28,8 +27,8 @@ export function createApp() {
       return cb(new Error('Not allowed by CORS'));
     },
     credentials: true,
-    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
+    allowedHeaders: ['Content-Type','Authorization','X-Requested-With'],
     optionsSuccessStatus: 204,
   };
 
@@ -41,7 +40,6 @@ export function createApp() {
   app.use(morgan('dev'));
 
   app.use('/auth', authRouter);
-  app.use(meetRouter);    
   app.use('/', apiRouter);
 
   app.use((_req, res) => res.status(404).json({ error: 'Not Found' }));
