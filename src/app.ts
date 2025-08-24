@@ -9,13 +9,13 @@ import { env } from './config/env';
 import { apiRouter } from './routes';
 import { authRouter } from './routes/auth';
 import { errorHandler } from './middlewares/errorHandler';
+import { meetRouter } from './routes/meet.routes';
 
 export function createApp() {
   const app = express();
 
   app.set('trust proxy', 1);
 
-  // allowlist из ENV (через запятую)
   const allowlist = (env.CORS_ORIGIN ?? '')
     .split(',')
     .map(s => s.trim())
@@ -23,7 +23,6 @@ export function createApp() {
 
   const corsOptions: cors.CorsOptions = {
     origin(origin, cb) {
-      // без Origin (curl/сервер-сервер) — пускаем
       if (!origin) return cb(null, true);
       if (allowlist.includes(origin)) return cb(null, true);
       return cb(new Error('Not allowed by CORS'));
@@ -34,7 +33,6 @@ export function createApp() {
     optionsSuccessStatus: 204,
   };
 
-  // Достаточно одного глобального CORS. Никаких app.options(...)
   app.use(cors(corsOptions));
 
   app.use(helmet());
@@ -48,6 +46,7 @@ export function createApp() {
 
   app.use((_req, res) => res.status(404).json({ error: 'Not Found' }));
   app.use(errorHandler);
+  app.use(meetRouter);
 
   return app;
 }
