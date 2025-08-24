@@ -1,16 +1,17 @@
 import { Router } from "express";
 import { z } from "zod";
 
+
 export const meetRouter = Router();
 
 const CreateMeetInput = z.object({
   issueKey: z.string(),
   summary: z.string().optional().default("Интервью"),
   candidateEmail: z.string().email(),
-  assigneeEmail: z.string().email().optional().or(z.literal("")).default(""),
-  reporterEmail: z.string().email().optional().or(z.literal("")).default(""),
-  companyEmails: z.string().optional().default(""),
-  interviewDate: z.string().datetime(),
+  assigneeEmail: z.string().optional().default(""),
+  reporterEmail: z.string().optional().default(""),
+  companyEmails: z.string().optional().default(""), 
+  interviewDate: z.string().datetime(),            
 });
 
 function timeoutAbort(ms: number) {
@@ -19,7 +20,7 @@ function timeoutAbort(ms: number) {
   return { signal: c.signal, cancel: () => clearTimeout(t) };
 }
 
-async function postWithTimeout(url: string, body: any, ms: number) {
+async function postJSON(url: string, body: unknown, ms: number) {
   const { signal, cancel } = timeoutAbort(ms);
   try {
     const r = await fetch(url, {
@@ -37,7 +38,9 @@ async function postWithTimeout(url: string, body: any, ms: number) {
   }
 }
 
-meetRouter.post("/meet/webhook", async (req, res) => {
+const router = Router();
+
+router.post("/webhook", async (req, res) => {
   const parsed = CreateMeetInput.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ ok: false, type: "zod", issues: parsed.error.issues });
@@ -53,7 +56,7 @@ meetRouter.post("/meet/webhook", async (req, res) => {
   let lastErr: any;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const { r, data, text } = await postWithTimeout(upstream, body, timeoutMs);
+      const { r, data, text } = await postJSON(upstream, body, timeoutMs);
       if (!r.ok) {
         return res.status(r.status).json({ ok: false, upstream: true, body: text || data });
       }
@@ -69,3 +72,5 @@ meetRouter.post("/meet/webhook", async (req, res) => {
   }
   return res.status(502).json({ ok: false, error: String(lastErr?.message || lastErr) });
 });
+
+meetRouter.use("/meet", router);
