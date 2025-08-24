@@ -159,12 +159,7 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
      return res.json(cand);
    }
 
-    if (update.meetLink && Array.isArray(update.interviews) && update.interviews.length > 0) {
-     update.interviews = [
-       { ...update.interviews[0], meetLink: update.meetLink },
-       ...update.interviews.slice(1),
-     ];
-   }
+    const update: any = { ...body };
     if (Object.prototype.hasOwnProperty.call(update, "position") && update.position === "") {
       update.position = null;
     }
