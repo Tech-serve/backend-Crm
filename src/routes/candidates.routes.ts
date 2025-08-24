@@ -1,3 +1,4 @@
+// backend/src/routes/candidates.routes.ts
 import { Router } from "express";
 import { z } from "zod";
 import { Candidate } from "../db/models/Candidate";
@@ -34,8 +35,8 @@ const CandidateCreateDTO = z.object({
   notes: z.string().optional(),
   department: DepartmentEnum.optional(),
   position: PositionEnum.optional(),
-  status: StatusEnum.optional(),        
-  interview: InterviewDTO.optional(),    
+  status: StatusEnum.optional(),        // по умолчанию “not_held”
+  interview: InterviewDTO.optional(),   // можно сразу передать первое интервью
   polygraphAt: z.string().datetime().optional(),
   acceptedAt: z.string().datetime().optional(),
   declinedAt: z.string().datetime().optional(),
@@ -80,6 +81,7 @@ function applyStatusSideEffects(update: any, nowISO: string) {
     update.acceptedAt = null;
     update.declinedAt = null;
   } else if (s === "reserve") {
+    // ничего не делаем автоматически
   } else if (s === "not_held") {
     update.polygraphAt = null;
     update.acceptedAt = null;
@@ -116,7 +118,7 @@ candidatesRouter.post("/", async (req, res, next) => {
       notes: body.notes,
       department: body.department,
       position: body.position ?? null,
-      status: body.status ?? "not_held",             
+      status: body.status ?? "not_held",
       interviews: body.interview ? [body.interview] : [],
       polygraphAt: body.polygraphAt ?? null,
       acceptedAt: body.acceptedAt ?? null,
@@ -125,6 +127,7 @@ candidatesRouter.post("/", async (req, res, next) => {
       polygraphAddress: body.polygraphAddress ?? "",
     };
 
+    // Если “в процессе” и нет события — ставим первое интервью на сейчас
     if (doc.status === "not_held" && doc.interviews.length === 0) {
       doc.interviews.push({
         scheduledAt: nowISO,
@@ -146,24 +149,37 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
   try {
     const body = CandidatePatchDTO.parse(req.body);
 
-     if (
-     Object.prototype.hasOwnProperty.call(body, "meetLink") &&
-     (!body.interviews || body.interviews.length === 0) &&
-     Object.keys(body).filter((k) => k !== "meetLink").length === 0
-   ) {
-     const cand = await Candidate.findById(req.params.id);
-     if (!cand) return res.status(404).json({ error: "Candidate not found" });
-     cand.meetLink = body.meetLink!;
-     if (cand.interviews?.length) cand.interviews[0].meetLink = body.meetLink!;
-     await cand.save();
-     return res.json(cand);
-   }
+    // ⚡ Быстрый апдейт meetLink — ТОЛЬКО если в теле больше НИЧЕГО нет
+    if (
+      Object.prototype.hasOwnProperty.call(body, "meetLink") &&
+      (!body.interviews || body.interviews.length === 0) &&
+      Object.keys(body).filter((k) => k !== "meetLink").length === 0
+    ) {
+      const cand = await Candidate.findById(req.params.id);
+      if (!cand) return res.status(404).json({ error: "Candidate not found" });
+      cand.meetLink = body.meetLink!;
+      if (cand.interviews?.length) cand.interviews[0].meetLink = body.meetLink!;
+      await cand.save();
+      return res.json(cand);
+    }
 
     const update: any = { ...body };
+
+    // Нормализуем position
     if (Object.prototype.hasOwnProperty.call(update, "position") && update.position === "") {
       update.position = null;
     }
-    if (Object.keys(update).length === 0) return res.status(400).json({ error: "Empty body" });
+
+    // Если прилетели interviews и при этом meetLink наверху не указан —
+    // зеркалим meetLink из head-интервью (чтобы UI всегда видел верхнее поле).
+    if (!update.meetLink && Array.isArray(update.interviews) && update.interviews.length > 0) {
+      const head = update.interviews[0];
+      if (head && head.meetLink) update.meetLink = head.meetLink;
+    }
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ error: "Empty body" });
+    }
 
     const nowISO = new Date().toISOString();
     if (update.status === "not_held") {
@@ -179,6 +195,7 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
     });
     if (!cand) return res.status(404).json({ error: "Candidate not found" });
 
+    // Синхронизация с Employee при статусе success
     const wasSuccess = candBefore?.status === "success";
     const isSuccess  = cand.status === "success";
     const emailLC    = (cand.email || "").toLowerCase();
@@ -216,7 +233,7 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
   }
 });
 
-/* ====================== METRICS & SNAPSHOTS — без изменений ======================= */
+/* ====================== METRICS & SNAPSHOTS ======================= */
 
 candidatesRouter.get("/metrics", async (req, res, next) => {
   try {
