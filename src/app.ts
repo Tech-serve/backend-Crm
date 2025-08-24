@@ -34,7 +34,6 @@ export function createApp() {
   };
 
   app.use(cors(corsOptions));
-
   app.use(helmet());
   app.use(compression());
   app.use(cookieParser());
@@ -42,11 +41,12 @@ export function createApp() {
   app.use(morgan('dev'));
 
   app.use('/auth', authRouter);
+  app.use(meetRouter);    
   app.use('/', apiRouter);
 
   app.use((_req, res) => res.status(404).json({ error: 'Not Found' }));
+
   app.use(errorHandler);
-  app.use(meetRouter);
 
   return app;
 }
