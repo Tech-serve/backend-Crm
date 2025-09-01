@@ -379,3 +379,15 @@ candidatesRouter.post("/snapshots/freeze", async (req, res, next) => {
     next(err);
   }
 });
+
+// ---------- DELETE /candidates/:id ----------
+candidatesRouter.delete("/:id", async (req, res, next) => {
+  try {
+    const id = String(req.params.id);
+    const deleted = await Candidate.findByIdAndDelete(id);
+    if (!deleted) return res.status(404).json({ error: "Candidate not found" });
+    return res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});

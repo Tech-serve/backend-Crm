@@ -140,3 +140,15 @@ employeesRouter.patch("/:id", async (req, res, next) => {
     next(err);
   }
 });
+
+// ---------- DELETE /employees/:id ----------
+employeesRouter.delete("/:id", async (req, res, next) => {
+  try {
+    const id = String(req.params.id);
+    const deleted = await Employee.findByIdAndDelete(id);
+    if (!deleted) return res.status(404).json({ error: "Employee not found" });
+    return res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
