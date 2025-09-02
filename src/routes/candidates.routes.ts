@@ -36,7 +36,7 @@ const CandidateCreateDTO = z.object({
   department: DepartmentEnum.optional(),
   position: PositionEnum.optional(),
   status: StatusEnum.optional(),        // по умолчанию “not_held”
-  interview: InterviewDTO.optional(),   // можно сразу передать первое интервью
+  interview: InterviewDTO.optional(),   // можно сразу передать первое Собеседование
   polygraphAt: z.string().datetime().optional(),
   acceptedAt: z.string().datetime().optional(),
   declinedAt: z.string().datetime().optional(),
@@ -127,7 +127,7 @@ candidatesRouter.post("/", async (req, res, next) => {
       polygraphAddress: body.polygraphAddress ?? "",
     };
 
-    // Если “в процессе” и нет события — ставим первое интервью на сейчас
+    // Если “в процессе” и нет события — ставим первое Собеседование на сейчас
     if (doc.status === "not_held" && doc.interviews.length === 0) {
       doc.interviews.push({
         scheduledAt: nowISO,
@@ -171,7 +171,7 @@ candidatesRouter.patch("/:id", async (req, res, next) => {
     }
 
     // Если прилетели interviews и при этом meetLink наверху не указан —
-    // зеркалим meetLink из head-интервью (чтобы UI всегда видел верхнее поле).
+    // зеркалим meetLink из head-Собеседование (чтобы UI всегда видел верхнее поле).
     if (!update.meetLink && Array.isArray(update.interviews) && update.interviews.length > 0) {
       const head = update.interviews[0];
       if (head && head.meetLink) update.meetLink = head.meetLink;

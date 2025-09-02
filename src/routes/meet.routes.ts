@@ -27,7 +27,7 @@ function normalizeEmails(input: unknown): string {
 const CreateMeetInput = z
   .object({
     issueKey: z.string().min(1),
-    summary: z.string().optional().default('Интервью'),
+    summary: z.string().optional().default('Собеседование'),
     candidateEmail: z.string().email(),
     assigneeEmail: z.string().email().optional().or(z.literal('')).default(''),
     reporterEmail: z.string().email().optional().or(z.literal('')).default(''),
