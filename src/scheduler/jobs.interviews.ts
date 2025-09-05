@@ -31,7 +31,7 @@ export async function scheduleInterviewJobs(agenda: Agenda) {
     await agenda
       .create('notify:interview', { ...baseData, chatIds, text })
       .unique({ k: 'itw-1h', ...baseData }, { insertOnly: true })
-      .schedule(at)
+      .schedule(at > new Date() ? at : new Date(Date.now() + 365*24*60*60*1000))
       .save();
   }
 }

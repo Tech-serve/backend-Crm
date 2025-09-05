@@ -1,7 +1,6 @@
-// src/utils/telegram.ts
 import https from 'https';
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8207780284:AAFGvmnqZ88yMWHZJ_w_HykltSeaISOyN5g';
 
 export function assertTelegramConfigured() {
   if (!TOKEN) throw new Error('TELEGRAM_BOT_TOKEN is not set');

@@ -1,59 +1,50 @@
-// backend/src/app.ts
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import compression from 'compression';
-import { env } from './config/env';
-import { apiRouter } from './routes';
-import { authRouter } from './routes/auth';
-import { errorHandler } from './middlewares/errorHandler';
 import os from 'os';
+
+import { env, corsAllowlist } from './config/env';
+import { apiRouter } from './routes';
+import { authRouter } from './routes/auth';    
+import { errorHandler } from './middlewares/errorHandler';
 
 export function createApp() {
   const app = express();
 
-  app.set('trust proxy', 1);
+  app.disable('x-powered-by');
 
-  const allowlist = (env.CORS_ORIGIN ?? '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
-
-  const corsOptions: cors.CorsOptions = {
-    origin(origin, cb) {
-      if (!origin) return cb(null, true);
-      if (allowlist.includes(origin)) return cb(null, true);
-      return cb(new Error('Not allowed by CORS'));
+  app.use(helmet({
+    crossOriginResourcePolicy: false, 
+  }));
+  app.use(cors({
+    origin: (origin, cb) => {
+      if (!origin || corsAllowlist.includes(origin)) return cb(null, true);
+      return cb(null, true); 
     },
     credentials: true,
-    methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
-    allowedHeaders: ['Content-Type','Authorization','X-Requested-With'],
-    optionsSuccessStatus: 204,
-  };
-
-  app.use(cors(corsOptions));
-  app.use(helmet());
-  app.use(compression());
+  }));
+  app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true }));
   app.use(cookieParser());
-  app.use(express.json({ limit: '1mb' }));
-  app.use(morgan('dev'));
+  app.use(compression());
 
-  app.use('/auth', authRouter);
-  app.use('/', apiRouter);
+  app.use('/api', apiRouter);
+  app.use('/api', authRouter);
+
+  app.get('/__whoami', (_req, res) => {
+    res.json({ host: os.hostname(), pid: process.pid, startedAt: new Date().toISOString() });
+  });
+  app.get('/api/__whoami', (_req, res) => {
+    res.json({ host: os.hostname(), pid: process.pid, startedAt: new Date().toISOString() });
+  });
 
   app.use((_req, res) => res.status(404).json({ error: 'Not Found' }));
 
   app.use(errorHandler);
-
-  app.get('/__whoami', (_req, res) => {
-    res.json({
-      host: os.hostname(),
-      pid: process.pid,
-      startedAt: new Date().toISOString()
-    });
-  });
 
   return app;
 }

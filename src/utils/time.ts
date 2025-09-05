@@ -1,5 +1,3 @@
-// src/utils/time.ts
-// Minimal timezone helpers without extra deps. Uses Intl API to compute offsets.
 export const APP_TZ = process.env.APP_TZ || 'Europe/Kyiv';
 
 function getTzOffsetMinutes(atUtc: Date, timeZone: string): number {
@@ -11,7 +9,6 @@ function getTzOffsetMinutes(atUtc: Date, timeZone: string): number {
   });
   const parts = dtf.formatToParts(atUtc);
   const tzName = parts.find(p => p.type === 'timeZoneName')?.value || 'GMT+0';
-  // tzName like "GMT+3" or "GMT+03:00"
   const m = tzName.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/);
   if (!m) return 0;
   const sign = m[1] === '-' ? -1 : 1;
@@ -20,9 +17,7 @@ function getTzOffsetMinutes(atUtc: Date, timeZone: string): number {
   return sign * (hh * 60 + mm);
 }
 
-/** Create a UTC Date that corresponds to local wall time in given TZ */
 export function makeZonedDateUTC(y: number, m1: number, d: number, hh = 0, mm = 0, timeZone = APP_TZ): Date {
-  // approximate UTC at that wall time
   const approxUtc = new Date(Date.UTC(y, m1 - 1, d, hh, mm));
   const offsetMin = getTzOffsetMinutes(approxUtc, timeZone);
   const utcMs = Date.UTC(y, m1 - 1, d, hh, mm) - offsetMin * 60_000;
