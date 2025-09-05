@@ -1,3 +1,90 @@
-Need to install the following packages:
-gitignore@0.7.0
-Ok to proceed? (y) 
+# === ОС и редакторы ===
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json   # (оставим рекомендации расширений в репо)
+
+# === Node.js ===
+node_modules/
+logs/
+*.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+pids/
+*.pid
+*.pid.lock
+node-repl-history
+
+# === Сборка/артефакты ===
+dist/
+build/
+out/
+.tmp/
+temp/
+*.tsbuildinfo
+
+# === Кеши инструментов ===
+.eslintcache
+.stylelintcache
+.turbo/
+.cache/
+.parcel-cache/
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_esm/
+.rts2_cache_umd/
+
+# === Тесты/репорты ===
+coverage/
+.nyc_output/
+test-results/
+reports/
+jest-html-reporters-*.html
+
+# === Переменные окружения ===
+.env
+.env.*
+!.env.example             # шаблон переменных окружения коммитим
+
+# === PM2 ===
+.pm2/
+
+# === Загрузка/хранилища (локальные) ===
+uploads/
+public/uploads/
+storage/
+data/
+dump/
+db-data/
+docker-data/
+volumes/
+tmp/
+temp/
+
+# === Prisma / БД локальные файлы ===
+prisma/dev.db
+prisma/dev.db-journal
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+# миграции Prisma храним в репозитории:
+!prisma/migrations/**
+
+# === Docker локальные оверрайды ===
+docker-compose.override.yml
+
+# === Локальные сертификаты/ключи ===
+*.pem
+*.key
+*.crt
+
+# === Прочее временное ===
+*.swp
+*.swo
+.sentryclirc
