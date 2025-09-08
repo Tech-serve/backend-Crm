@@ -3,6 +3,8 @@ import { sendTelegram } from '../services/telegram';
 // Если у тебя модель Employees в другом месте — поправь импорт ниже
 import { Employee } from '../db/models/Employee';
 
+const TZ = process.env.APP_TZ || 'Europe/Kyiv';
+
 /** Запуск простых планировщиков */
 export function startSchedulers() {
   let lastRunDayKey = '';
@@ -12,11 +14,11 @@ export function startSchedulers() {
       // 09:00 Europe/Moscow — поздравления с ДР
       const now = new Date();
       const fmt = new Intl.DateTimeFormat('ru-RU', {
-        timeZone: 'Europe/Moscow',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      });
+            timeZone: TZ,
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+            });
       const [h, m] = fmt.format(now).split(':').map(Number);
       const dayKey = now.toISOString().slice(0, 10);
 
