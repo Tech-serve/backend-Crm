@@ -7,8 +7,7 @@ const envSchema = z.object({
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
   CORS_ORIGIN: z.string().default('https://crm.vroo.it.com'),
   JWT_SECRET: z.string().default('change-me'),
-  TELEGRAM_BOT_TOKEN: z.string().default(''),
-  APP_TZ: z.string().default('Europe/Kyiv'),
+  TELEGRAM_BOT_TOKEN: z.string().min(10),
 });
 
 export const env = envSchema.parse(process.env);

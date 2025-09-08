@@ -1,43 +1,59 @@
-import Agenda from 'agenda';
-import { env } from '../config/env';
-import { scheduleBirthdayJobs } from './jobs.birthdays';
-import { scheduleInterviewJobs } from './jobs.interviews';
+import { Subscriber } from '../db/models/Subscriber';
+import { sendTelegram } from '../services/telegram';
+// Если у тебя модель Employees в другом месте — поправь импорт ниже
+import { Employee } from '../db/models/Employee';
 
-export let agenda: Agenda;
+/** Запуск простых планировщиков */
+export function startSchedulers() {
+  let lastRunDayKey = '';
 
-export async function startScheduler(mongoUri?: string) {
-  const uri = mongoUri || env.MONGODB_URI;
-  agenda = new Agenda({ db: { address: uri, collection: 'agendaJobs' } });
-  defineJobs(agenda);
-  await agenda.start();
+  setInterval(async () => {
+    try {
+      // 09:00 Europe/Moscow — поздравления с ДР
+      const now = new Date();
+      const fmt = new Intl.DateTimeFormat('ru-RU', {
+        timeZone: 'Europe/Moscow',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+      const [h, m] = fmt.format(now).split(':').map(Number);
+      const dayKey = now.toISOString().slice(0, 10);
 
-  await agenda.every('15 minutes', 'sync:interview-reminders', {});
-  await agenda.every('1 day', 'sync:birthday-reminders', {}, { timezone: process.env.APP_TZ || 'Europe/Kyiv' });
+      if (h === 9 && m === 0 && dayKey !== lastRunDayKey) {
+        lastRunDayKey = dayKey;
+        await notifyBirthdays();
+      }
+    } catch {
+      // проглатываем — чтобы не ронять цикл
+    }
+  }, 30 * 1000);
 }
 
-function defineJobs(agenda: Agenda) {
-  // явные типы, чтобы убрать implicit any
-  agenda.define('sync:birthday-reminders', async (_job: unknown) => {
-    await scheduleBirthdayJobs(agenda);
-  });
+async function notifyBirthdays() {
+  const today = new Date();
+  const tMonth = today.getUTCMonth();
+  const tDate  = today.getUTCDate();
 
-  agenda.define('sync:interview-reminders', async (_job: unknown) => {
-    await scheduleInterviewJobs(agenda);
+  const employees = await Employee.find({ birthdayAt: { $ne: null } }).lean();
+  const todays = employees.filter((e: any) => {
+    const d = new Date(e.birthdayAt);
+    return d.getUTCMonth() === tMonth && d.getUTCDate() === tDate;
   });
+  if (!todays.length) return;
 
-  agenda.define('notify:birthday', async (job: any) => {
-    const data = job.attrs.data as any;
-    const { text, chatIds } = data || {};
-    if (!Array.isArray(chatIds) || !text) return;
-    const { sendTelegramMessage } = await import('../utils/telegram');
-    for (const id of chatIds) { try { await sendTelegramMessage(id, text); } catch {} }
-  });
+  const subs = await Subscriber.find({ enabled: true }).lean();
+  if (!subs.length) return;
 
-  agenda.define('notify:interview', async (job: any) => {
-    const data = job.attrs.data as any;
-    const { text, chatIds } = data || {};
-    if (!Array.isArray(chatIds) || !text) return;
-    const { sendTelegramMessage } = await import('../utils/telegram');
-    for (const id of chatIds) { try { await sendTelegramMessage(id, text); } catch {} }
-  });
+  const list = todays
+    .map((e: any) => {
+      const fio = [e.lastName, e.firstName, e.middleName].filter(Boolean).join(' ');
+      return `• ${fio}`.trim();
+    })
+    .join('\n');
+
+  const text = `🎉 Сегодня день рождения:\n${list}`;
+  for (const s of subs) {
+    try { await sendTelegram(s.chatId, text); } catch {}
+  }
 }

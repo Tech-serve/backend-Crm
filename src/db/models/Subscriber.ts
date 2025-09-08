@@ -1,14 +1,12 @@
-// src/db/models/Subscriber.ts
-import { Schema, model, InferSchemaType } from 'mongoose';
+import { Schema, model } from 'mongoose';
 
-const subscriberSchema = new Schema({
-  chatId:   { type: Number, required: true, unique: true, index: true },
-  username: { type: String, default: '' },
-  firstName:{ type: String, default: '' },
-  lastName: { type: String, default: '' },
-}, { timestamps: true });
+const SubscriberSchema = new Schema({
+  chatId:     { type: Number, required: true, unique: true },
+  username:   { type: String },
+  firstName:  { type: String },
+  lastName:   { type: String },
+  enabled:    { type: Boolean, default: true },
+  createdAt:  { type: Date, default: Date.now },
+});
 
-subscriberSchema.index({ createdAt: -1 });
-
-export type SubscriberDoc = InferSchemaType<typeof subscriberSchema>;
-export const Subscriber = model<SubscriberDoc>('Subscriber', subscriberSchema);
+export const Subscriber = model('Subscriber', SubscriberSchema);
