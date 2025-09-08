@@ -1,6 +1,6 @@
-import mongoose from 'mongoose';
+import { Schema, model } from 'mongoose';
 
-const SubscriberSchema = new mongoose.Schema(
+const SubscriberSchema = new Schema(
   {
     chatId:   { type: Number, required: true, unique: true, index: true },
     username: { type: String, default: '' },
@@ -11,4 +11,4 @@ const SubscriberSchema = new mongoose.Schema(
   { collection: 'subscribers', timestamps: true }
 );
 
-export const Subscriber = mongoose.model('Subscriber', SubscriberSchema);
+export const Subscriber = model('Subscriber', SubscriberSchema);
