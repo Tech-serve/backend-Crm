@@ -3,7 +3,6 @@ import { Subscriber } from '../db/models/Subscriber';
 import { sendTelegram } from '../services/telegram';
 import { Employee } from '../db/models/Employee';
 import { Candidate } from '../db/models/Candidate';
-import mongoose from 'mongoose';
 
 const TZ = process.env.APP_TZ || 'Europe/Kyiv';
 
@@ -22,32 +21,39 @@ function mdInTZ(d: Date, tz: string) {
   return `${mm}-${dd}`;
 }
 
+function fmtKyiv(d: Date) {
+  return new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, dateStyle: 'short', timeStyle: 'short' }).format(d);
+}
+
 function displayName(e: any) {
   return (e.fullName as string) || [e.lastName, e.firstName, e.middleName].filter(Boolean).join(' ') || 'Сотрудник';
 }
 
 export function startSchedulers() {
-  let lastRunDayKey = '';
+  let last09Key = '';
+  let last12Key = '';
 
   setInterval(async () => {
     try {
       const now = new Date();
       const { h, m, dayKey } = hmInTZ(now, TZ);
-      if (h === 9 && m === 0 && dayKey !== lastRunDayKey) {
-        lastRunDayKey = dayKey;
-        await notifyBirthdays();
-      }
-    } catch {}
-  }, 30_000);
 
-  setInterval(async () => {
-    try {
-      await notifyMeetsIn60m();
+      if (h === 9 && m === 0 && dayKey !== last09Key) {
+        last09Key = dayKey;
+        await notifyBirthdaysToday();
+      }
+
+      if (h === 12 && m === 0 && dayKey !== last12Key) {
+        last12Key = dayKey;
+        await notifyBirthdaysIn7Days();
+      }
+
+      await notifyMeets1hBefore();
     } catch {}
   }, 30_000);
 }
 
-async function notifyBirthdays() {
+async function notifyBirthdaysToday() {
   const todayMD = mdInTZ(new Date(), TZ);
   const employees = await Employee.find({ birthdayAt: { $ne: null } }).lean();
   const todays = employees.filter((e: any) => mdInTZ(new Date(e.birthdayAt), TZ) === todayMD);
@@ -58,54 +64,60 @@ async function notifyBirthdays() {
 
   const list = todays.map(displayName).map(n => `• ${n}`).join('\n');
   const text = `🎉 Сегодня день рождения:\n${list}`;
-
-  for (const s of subs) {
-    try { await sendTelegram((s as any).chatId, text); } catch {}
-  }
+  for (const s of subs) { try { await sendTelegram(s.chatId, text); } catch {} }
 }
 
-const MeetReminder = mongoose.model('MeetReminder',
-  new mongoose.Schema({ key: { type: String, unique: true }, sentAt: Date }, { collection: 'meet_reminders' })
-);
+async function notifyBirthdaysIn7Days() {
+  const target = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const targetMD = mdInTZ(target, TZ);
 
-async function notifyMeetsIn60m() {
-  const now = new Date();
-  const from = new Date(now.getTime() + 55 * 60 * 1000);
-  const to   = new Date(now.getTime() + 65 * 60 * 1000);
-
-  const cands = await Candidate.find({
-    interviews: { $elemMatch: { scheduledAt: { $gte: from, $lte: to } } }
-  }).lean();
-  if (!cands.length) return;
+  const employees = await Employee.find({ birthdayAt: { $ne: null } }).lean();
+  const soon = employees.filter((e: any) => mdInTZ(new Date(e.birthdayAt), TZ) === targetMD);
+  if (!soon.length) return;
 
   const subs = await Subscriber.find({ enabled: true }).lean();
   if (!subs.length) return;
 
-  const fmt = new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, dateStyle: 'short', timeStyle: 'short', hour12: false });
+  const list = soon.map(displayName).map(n => `• ${n}`).join('\n');
+  const text = `📅 Ровно через неделю день рождения:\n${list}`;
+  for (const s of subs) { try { await sendTelegram(s.chatId, text); } catch {} }
+}
 
-  for (const c of cands) {
-    for (const iv of (c as any).interviews || []) {
-      if (!iv?.scheduledAt) continue;
-      const t = new Date(iv.scheduledAt);
-      if (t < from || t > to) continue;
+async function notifyMeets1hBefore() {
+  const now = new Date();
+  const from = new Date(now.getTime() + 60 * 60 * 1000 - 30 * 1000);
+  const to   = new Date(now.getTime() + 60 * 60 * 1000 + 30 * 1000);
 
-      const key = `${(c as any)._id}:${t.toISOString()}`;
-      const ins: any = await MeetReminder.updateOne(
-        { key },
-        { $setOnInsert: { sentAt: new Date() } },
-        { upsert: true }
-      );
-      if (ins.matchedCount && !ins.upsertedId) continue;
+  const candidates = await Candidate.find(
+    { 'interviews.0.scheduledAt': { $gte: from, $lte: to } },
+    { fullName: 1, email: 1, interviews: { $slice: 1 } }
+  ).lean();
 
-      const who = (c as any).fullName || 'Кандидат';
-      const title = iv.notes || 'Собеседование';
-      const when  = fmt.format(t);
-      const link  = iv.meetLink ? `\n${iv.meetLink}` : '';
-      const text  = `⏰ Через час: ${title} с «${who}»\n${when}${link}`;
+  if (!candidates.length) return;
 
-      for (const s of subs) {
-        try { await sendTelegram((s as any).chatId, text); } catch {}
+  const subs = await Subscriber.find({ enabled: true }).lean();
+  if (!subs.length) return;
+
+  for (const c of candidates) {
+    const iv = (Array.isArray(c.interviews) ? c.interviews[0] : null) as any;
+    if (!iv?.scheduledAt) continue;
+
+    const upd = await Candidate.updateOne(
+      { _id: c._id },
+      { $set: { 'interviews.$[head].reminded1hAt': new Date() } },
+      {
+        arrayFilters: [{ 'head.scheduledAt': new Date(iv.scheduledAt), 'head.reminded1hAt': { $exists: false } }],
+        strict: false,
       }
-    }
+    );
+
+    if (upd.modifiedCount !== 1) continue;
+
+    const when = fmtKyiv(new Date(iv.scheduledAt));
+    const name = (c as any).fullName || (c as any).email || `Кандидат ${c._id}`;
+    const link = iv.meetLink ? `\n${iv.meetLink}` : '';
+    const text = `⏰ Через 1 час звонок:\n• ${when} — ${name}${link}`;
+
+    for (const s of subs) { try { await sendTelegram(s.chatId, text); } catch {} }
   }
 }
