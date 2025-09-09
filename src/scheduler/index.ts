@@ -29,6 +29,7 @@ function displayName(e: any) {
   return (e.fullName as string) || [e.lastName, e.firstName, e.middleName].filter(Boolean).join(' ') || 'Сотрудник';
 }
 
+/** Планировщики: ДР (09:00 сегодня, 12:00 за 7 дней) + миты за 1 час */
 export function startSchedulers() {
   let last09Key = '';
   let last12Key = '';
@@ -42,14 +43,15 @@ export function startSchedulers() {
         last09Key = dayKey;
         await notifyBirthdaysToday();
       }
-
       if (h === 12 && m === 0 && dayKey !== last12Key) {
         last12Key = dayKey;
         await notifyBirthdaysIn7Days();
       }
 
-      await notifyMeets1hBefore();
-    } catch {}
+      await notifyMeets1hBefore(); // каждые 30с проверяем окно ±30с около T+1h
+    } catch {
+      // без падений цикла
+    }
   }, 30_000);
 }
 
@@ -83,13 +85,20 @@ async function notifyBirthdaysIn7Days() {
   for (const s of subs) { try { await sendTelegram(s.chatId, text); } catch {} }
 }
 
+/**
+ * Напоминание за 1 час до интервью:
+ * - в БД scheduledAt хранится как ISO-строка → фильтруем в JS, не пытаемся сравнивать как Date в запросе
+ * - помечаем отправку полем head.reminded1hAt (ISO), чтобы не слать повторно
+ */
 async function notifyMeets1hBefore() {
-  const now = new Date();
-  const from = new Date(now.getTime() + 60 * 60 * 1000 - 30 * 1000);
-  const to   = new Date(now.getTime() + 60 * 60 * 1000 + 30 * 1000);
+  const now = Date.now();
+  const target = new Date(now + 60 * 60 * 1000);         // T+1h
+  const from   = new Date(target.getTime() - 30 * 1000); // окно -30с
+  const to     = new Date(target.getTime() + 30 * 1000); // окно +30с
 
+  // Берём только «шапку» интервью
   const candidates = await Candidate.find(
-    { 'interviews.0.scheduledAt': { $gte: from, $lte: to } },
+    { 'interviews.0.scheduledAt': { $exists: true } },
     { fullName: 1, email: 1, interviews: { $slice: 1 } }
   ).lean();
 
@@ -99,25 +108,34 @@ async function notifyMeets1hBefore() {
   if (!subs.length) return;
 
   for (const c of candidates) {
-    const iv = (Array.isArray(c.interviews) ? c.interviews[0] : null) as any;
-    if (!iv?.scheduledAt) continue;
+    const head = Array.isArray(c.interviews) ? (c.interviews[0] as any) : null;
+    if (!head?.scheduledAt) continue;
 
-    const upd = await Candidate.updateOne(
-      { _id: c._id },
-      { $set: { 'interviews.$[head].reminded1hAt': new Date() } },
-      {
-        arrayFilters: [{ 'head.scheduledAt': new Date(iv.scheduledAt), 'head.reminded1hAt': { $exists: false } }],
-        strict: false,
-      }
-    );
+    // scheduledAt строка ISO → сравниваем как Date в памяти
+    const when = new Date(head.scheduledAt);
+    if (isNaN(+when)) continue; // мусор
 
-    if (upd.modifiedCount !== 1) continue;
+    // уже напоминали?
+    if (head.reminded1hAt) continue;
 
-    const when = fmtKyiv(new Date(iv.scheduledAt));
-    const name = (c as any).fullName || (c as any).email || `Кандидат ${c._id}`;
-    const link = iv.meetLink ? `\n${iv.meetLink}` : '';
-    const text = `⏰ Через 1 час звонок:\n• ${when} — ${name}${link}`;
+    if (when >= from && when <= to) {
+      // Ставим отметку, чтобы не дублить (строгим по точному совпадению значения scheduledAt)
+      const upd = await Candidate.updateOne(
+        { _id: c._id },
+        { $set: { 'interviews.$[head].reminded1hAt': new Date().toISOString() } },
+        {
+          arrayFilters: [{ 'head.scheduledAt': head.scheduledAt, 'head.reminded1hAt': { $exists: false } }],
+          strict: false,
+        }
+      );
 
-    for (const s of subs) { try { await sendTelegram(s.chatId, text); } catch {} }
+      if (upd.modifiedCount !== 1) continue;
+
+      const label = (c as any).fullName || (c as any).email || `Кандидат ${c._id}`;
+      const link  = head.meetLink ? `\n${head.meetLink}` : '';
+      const text  = `⏰ Через 1 час звонок:\n• ${fmtKyiv(when)} — ${label}${link}`;
+
+      for (const s of subs) { try { await sendTelegram(s.chatId, text); } catch {} }
+    }
   }
 }
