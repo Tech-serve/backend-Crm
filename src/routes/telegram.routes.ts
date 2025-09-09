@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { env } from '../config/env';
 import { Subscriber } from '../db/models/Subscriber';
 import { sendTelegram } from '../services/telegram';
+import { runMeets1hOnce } from '../scheduler';
 
 export const telegramRouter = Router();
 
@@ -42,12 +43,22 @@ telegramRouter.post('/telegram/webhook/:token', async (req: Request, res: Respon
       try {
         await sendTelegram(chatId, '✅ Подписка оформлена. Будете получать уведомления о ДР и митах.');
       } catch {}
+
+
+
+  try {
+    const out = await runMeets1hOnce();
+    return res.json({ ok: true, ...out });
+  } catch (e:any) {
+    return res.status(500).json({ ok: false, error: e?.message || 'error' });
+  }
     }
 
     return res.json({ ok: true });
   } catch (e:any) {
     return res.status(500).json({ ok: false, error: e?.message || 'error' });
   }
+
 });
 
 /** Ручной тест рассылки: POST /api/telegram/test {text?: string} */

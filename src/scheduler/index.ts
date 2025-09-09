@@ -1,4 +1,3 @@
-// src/scheduler/index.ts
 import { Subscriber } from '../db/models/Subscriber';
 import { sendTelegram } from '../services/telegram';
 import { Employee } from '../db/models/Employee';
@@ -29,6 +28,67 @@ function displayName(e: any) {
   return (e.fullName as string) || [e.lastName, e.firstName, e.middleName].filter(Boolean).join(' ') || 'Сотрудник';
 }
 
+/** ПУБЛИЧНО: единичный запуск напоминаний «за 1 час», с отчётом */
+export async function runMeets1hOnce() {
+  const now = Date.now();
+  const target = new Date(now + 60 * 60 * 1000);
+  // окно пошире, чтобы не промахнуться, пока мы тестим
+  const from = new Date(target.getTime() - 120 * 1000);
+  const to   = new Date(target.getTime() + 120 * 1000);
+
+  const subs = await Subscriber.find({ enabled: true }).lean();
+  if (!subs.length) {
+    return { checked: 0, matched: 0, delivered: 0, items: [], note: 'no subscribers' };
+  }
+
+  const candidates = await Candidate.find(
+    { 'interviews.0.scheduledAt': { $exists: true } },
+    { fullName: 1, email: 1, interviews: { $slice: 1 } }
+  ).lean();
+
+  let checked = 0, matched = 0, delivered = 0;
+  const items: Array<{id:string; when:string; name:string; sent:boolean}> = [];
+
+  for (const c of candidates) {
+    const head = Array.isArray(c.interviews) ? (c.interviews[0] as any) : null;
+    if (!head?.scheduledAt) continue;
+
+    const when = new Date(head.scheduledAt);
+    if (isNaN(+when)) continue;
+
+    checked++;
+
+    // уже напоминали?
+    if (head.reminded1hAt) continue;
+
+    if (when >= from && when <= to) {
+      matched++;
+
+      // пометка, чтобы не дублировать
+      const upd = await Candidate.updateOne(
+        { _id: c._id },
+        { $set: { 'interviews.$[head].reminded1hAt': new Date().toISOString() } },
+        { arrayFilters: [{ 'head.scheduledAt': head.scheduledAt, 'head.reminded1hAt': { $exists: false } }], strict: false }
+      );
+
+      let sent = false;
+      if (upd.modifiedCount === 1) {
+        const label = (c as any).fullName || (c as any).email || `Кандидат ${c._id}`;
+        const link  = head.meetLink ? `\n${head.meetLink}` : '';
+        const text  = `⏰ Через 1 час звонок:\n• ${fmtKyiv(when)} — ${label}${link}`;
+
+        for (const s of subs) { try { await sendTelegram(s.chatId, text); sent = true; delivered++; } catch {} }
+      }
+
+      items.push({ id: String(c._id), when: when.toISOString(), name: (c as any).fullName || (c as any).email || '', sent });
+    }
+  }
+
+  const summary = { checked, matched, delivered, items };
+  console.log('[MEET1H]', summary);
+  return summary;
+}
+
 /** Планировщики: ДР (09:00 сегодня, 12:00 за 7 дней) + миты за 1 час */
 export function startSchedulers() {
   let last09Key = '';
@@ -48,9 +108,9 @@ export function startSchedulers() {
         await notifyBirthdaysIn7Days();
       }
 
-      await notifyMeets1hBefore(); // каждые 30с проверяем окно ±30с около T+1h
-    } catch {
-      // без падений цикла
+      await runMeets1hOnce();
+    } catch (e) {
+      console.warn('[SCHED] cycle error:', (e as any)?.message || e);
     }
   }, 30_000);
 }
@@ -83,59 +143,4 @@ async function notifyBirthdaysIn7Days() {
   const list = soon.map(displayName).map(n => `• ${n}`).join('\n');
   const text = `📅 Ровно через неделю день рождения:\n${list}`;
   for (const s of subs) { try { await sendTelegram(s.chatId, text); } catch {} }
-}
-
-/**
- * Напоминание за 1 час до интервью:
- * - в БД scheduledAt хранится как ISO-строка → фильтруем в JS, не пытаемся сравнивать как Date в запросе
- * - помечаем отправку полем head.reminded1hAt (ISO), чтобы не слать повторно
- */
-async function notifyMeets1hBefore() {
-  const now = Date.now();
-  const target = new Date(now + 60 * 60 * 1000);         // T+1h
-  const from   = new Date(target.getTime() - 30 * 1000); // окно -30с
-  const to     = new Date(target.getTime() + 30 * 1000); // окно +30с
-
-  // Берём только «шапку» интервью
-  const candidates = await Candidate.find(
-    { 'interviews.0.scheduledAt': { $exists: true } },
-    { fullName: 1, email: 1, interviews: { $slice: 1 } }
-  ).lean();
-
-  if (!candidates.length) return;
-
-  const subs = await Subscriber.find({ enabled: true }).lean();
-  if (!subs.length) return;
-
-  for (const c of candidates) {
-    const head = Array.isArray(c.interviews) ? (c.interviews[0] as any) : null;
-    if (!head?.scheduledAt) continue;
-
-    // scheduledAt строка ISO → сравниваем как Date в памяти
-    const when = new Date(head.scheduledAt);
-    if (isNaN(+when)) continue; // мусор
-
-    // уже напоминали?
-    if (head.reminded1hAt) continue;
-
-    if (when >= from && when <= to) {
-      // Ставим отметку, чтобы не дублить (строгим по точному совпадению значения scheduledAt)
-      const upd = await Candidate.updateOne(
-        { _id: c._id },
-        { $set: { 'interviews.$[head].reminded1hAt': new Date().toISOString() } },
-        {
-          arrayFilters: [{ 'head.scheduledAt': head.scheduledAt, 'head.reminded1hAt': { $exists: false } }],
-          strict: false,
-        }
-      );
-
-      if (upd.modifiedCount !== 1) continue;
-
-      const label = (c as any).fullName || (c as any).email || `Кандидат ${c._id}`;
-      const link  = head.meetLink ? `\n${head.meetLink}` : '';
-      const text  = `⏰ Через 1 час звонок:\n• ${fmtKyiv(when)} — ${label}${link}`;
-
-      for (const s of subs) { try { await sendTelegram(s.chatId, text); } catch {} }
-    }
-  }
 }
