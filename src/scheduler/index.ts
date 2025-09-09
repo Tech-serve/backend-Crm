@@ -28,18 +28,11 @@ function displayName(e: any) {
   return (e.fullName as string) || [e.lastName, e.firstName, e.middleName].filter(Boolean).join(' ') || 'Сотрудник';
 }
 
-/** ПУБЛИЧНО: единичный запуск напоминаний «за 1 час», с отчётом */
 export async function runMeets1hOnce() {
-  const now = Date.now();
-  const target = new Date(now + 60 * 60 * 1000);
-  // окно пошире, чтобы не промахнуться, пока мы тестим
-  const from = new Date(target.getTime() - 120 * 1000);
-  const to   = new Date(target.getTime() + 120 * 1000);
+  const nowMs = Date.now();
 
   const subs = await Subscriber.find({ enabled: true }).lean();
-  if (!subs.length) {
-    return { checked: 0, matched: 0, delivered: 0, items: [], note: 'no subscribers' };
-  }
+  if (!subs.length) return { checked: 0, matched: 0, delivered: 0, items: [], note: 'no subscribers' };
 
   const candidates = await Candidate.find(
     { 'interviews.0.scheduledAt': { $exists: true } },
@@ -47,7 +40,7 @@ export async function runMeets1hOnce() {
   ).lean();
 
   let checked = 0, matched = 0, delivered = 0;
-  const items: Array<{id:string; when:string; name:string; sent:boolean}> = [];
+  const items: Array<{ id: string; when: string; name: string; sent: boolean }> = [];
 
   for (const c of candidates) {
     const head = Array.isArray(c.interviews) ? (c.interviews[0] as any) : null;
@@ -58,13 +51,12 @@ export async function runMeets1hOnce() {
 
     checked++;
 
-    // уже напоминали?
     if (head.reminded1hAt) continue;
 
-    if (when >= from && when <= to) {
+    const diffMin = Math.round((when.getTime() - nowMs) / 60000);
+    if (diffMin === 60) {
       matched++;
 
-      // пометка, чтобы не дублировать
       const upd = await Candidate.updateOne(
         { _id: c._id },
         { $set: { 'interviews.$[head].reminded1hAt': new Date().toISOString() } },
@@ -74,10 +66,12 @@ export async function runMeets1hOnce() {
       let sent = false;
       if (upd.modifiedCount === 1) {
         const label = (c as any).fullName || (c as any).email || `Кандидат ${c._id}`;
-        const link  = head.meetLink ? `\n${head.meetLink}` : '';
-        const text  = `⏰ Через 1 час звонок:\n• ${fmtKyiv(when)} — ${label}${link}`;
+        const link = head.meetLink ? `\n${head.meetLink}` : '';
+        const text = `⏰ Через 1 час звонок:\n• ${fmtKyiv(when)} — ${label}${link}`;
 
-        for (const s of subs) { try { await sendTelegram(s.chatId, text); sent = true; delivered++; } catch {} }
+        for (const s of subs) {
+          try { await sendTelegram(s.chatId, text); sent = true; delivered++; } catch {}
+        }
       }
 
       items.push({ id: String(c._id), when: when.toISOString(), name: (c as any).fullName || (c as any).email || '', sent });
@@ -89,7 +83,6 @@ export async function runMeets1hOnce() {
   return summary;
 }
 
-/** Планировщики: ДР (09:00 сегодня, 12:00 за 7 дней) + миты за 1 час */
 export function startSchedulers() {
   let last09Key = '';
   let last12Key = '';
