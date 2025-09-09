@@ -1,30 +1,25 @@
+// backend/src/routes/telegram.routes.ts
 import { Router, Request, Response } from 'express';
 import { env } from '../config/env';
 import { Subscriber } from '../db/models/Subscriber';
 import { sendTelegram } from '../services/telegram';
-import { runMeets1hOnce } from '../scheduler';
 
 export const telegramRouter = Router();
 
-/** Вебхук: /api/telegram/webhook/:token */
+/** Вебхук: /telegram/webhook/:token */
 telegramRouter.post('/telegram/webhook/:token', async (req: Request, res: Response) => {
   try {
     const { token } = req.params;
-    if (token !== env.TELEGRAM_BOT_TOKEN) {
+    if (!env.TELEGRAM_BOT_TOKEN || token !== env.TELEGRAM_BOT_TOKEN) {
       return res.status(401).json({ ok: false, error: 'bad token' });
     }
 
-    const update = req.body;
-    const msg  = update?.message;
+    const msg  = req.body?.message;
     const chat = msg?.chat;
+    const text = (msg?.text || '').trim().toLowerCase();
 
-    if (!chat?.id) return res.json({ ok: true });
-
-    const chatId = Number(chat.id);
-    const text   = (msg?.text || '').trim();
-
-    // автоподписка по /start
-    if (text.toLowerCase().startsWith('/start')) {
+    if (chat?.id && text.startsWith('/start')) {
+      const chatId = Number(chat.id);
       await Subscriber.updateOne(
         { chatId },
         {
@@ -33,35 +28,26 @@ telegramRouter.post('/telegram/webhook/:token', async (req: Request, res: Respon
             username: chat.username || '',
             firstName: chat.first_name || '',
             lastName: chat.last_name || '',
-            enabled: true,            // ← ВКЛЮЧАЕМ СРАЗУ
+            enabled: true, // ← автоматически включаем рассылку
           },
           $setOnInsert: { createdAt: new Date() },
         },
-        { upsert: true, setDefaultsOnInsert: true } // чтобы сработали дефолты схемы
+        { upsert: true, setDefaultsOnInsert: true }
       );
 
       try {
         await sendTelegram(chatId, '✅ Подписка оформлена. Будете получать уведомления о ДР и митах.');
       } catch {}
-
-
-
-  try {
-    const out = await runMeets1hOnce();
-    return res.json({ ok: true, ...out });
-  } catch (e:any) {
-    return res.status(500).json({ ok: false, error: e?.message || 'error' });
-  }
     }
 
     return res.json({ ok: true });
-  } catch (e:any) {
-    return res.status(500).json({ ok: false, error: e?.message || 'error' });
+  } catch {
+    // Никогда не роняем вебхук — Telegram ждёт 200
+    return res.status(200).json({ ok: true });
   }
-
 });
 
-/** Ручной тест рассылки: POST /api/telegram/test {text?: string} */
+/** Ручной тест рассылки: POST /telegram/test {text?: string} */
 telegramRouter.post('/telegram/test', async (req: Request, res: Response) => {
   const text = (req.body?.text as string) || '✅ CRM: тест уведомлений';
   const subs = await Subscriber.find({ enabled: true }).lean();
