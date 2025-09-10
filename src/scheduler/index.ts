@@ -28,12 +28,13 @@ function displayName(e: any) {
   return (e.fullName as string) || [e.lastName, e.firstName, e.middleName].filter(Boolean).join(' ') || 'Сотрудник';
 }
 
+// scheduler/index.ts
 export async function runMeets1hOnce() {
-  const nowMs = Date.now();
-
+  const now = Date.now();
   const subs = await Subscriber.find({ enabled: true }).lean();
   if (!subs.length) return { checked: 0, matched: 0, delivered: 0, items: [], note: 'no subscribers' };
 
+  // берём только «шапку» (первое интервью)
   const candidates = await Candidate.find(
     { 'interviews.0.scheduledAt': { $exists: true } },
     { fullName: 1, email: 1, interviews: { $slice: 1 } }
@@ -48,13 +49,14 @@ export async function runMeets1hOnce() {
 
     const when = new Date(head.scheduledAt);
     if (isNaN(+when)) continue;
-
     checked++;
 
+    // уже напоминали — пропускаем
     if (head.reminded1hAt) continue;
 
-    const diffMin = Math.round((when.getTime() - nowMs) / 60000);
-    if (diffMin === 60) {
+    // "ровно за час" как узкое окно ±90 сек от часа
+    const diffSec = (when.getTime() - now) / 1000;
+    if (diffSec >= 60 * 60 - 90 && diffSec <= 60 * 60 + 90) {
       matched++;
 
       const upd = await Candidate.updateOne(
@@ -66,12 +68,9 @@ export async function runMeets1hOnce() {
       let sent = false;
       if (upd.modifiedCount === 1) {
         const label = (c as any).fullName || (c as any).email || `Кандидат ${c._id}`;
-        const link = head.meetLink ? `\n${head.meetLink}` : '';
-        const text = `⏰ Через 1 час звонок:\n• ${fmtKyiv(when)} — ${label}${link}`;
-
-        for (const s of subs) {
-          try { await sendTelegram(s.chatId, text); sent = true; delivered++; } catch {}
-        }
+        const link  = head.meetLink ? `\n${head.meetLink}` : '';
+        const text  = `⏰ Через 1 час звонок:\n• ${new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, dateStyle: 'short', timeStyle: 'short' }).format(when)} — ${label}${link}`;
+        for (const s of subs) { try { await sendTelegram(s.chatId, text); sent = true; delivered++; } catch {} }
       }
 
       items.push({ id: String(c._id), when: when.toISOString(), name: (c as any).fullName || (c as any).email || '', sent });
