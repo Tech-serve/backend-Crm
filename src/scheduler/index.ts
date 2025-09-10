@@ -2,6 +2,7 @@ import { Subscriber } from '../db/models/Subscriber';
 import { sendTelegram } from '../services/telegram';
 import { Employee } from '../db/models/Employee';
 import { Candidate } from '../db/models/Candidate';
+import { Notification } from '../db/models/Notification';
 
 const TZ = process.env.APP_TZ || 'Europe/Kyiv';
 
@@ -24,18 +25,20 @@ function fmtKyiv(d: Date) {
   return new Intl.DateTimeFormat('ru-RU', { timeZone: TZ, dateStyle: 'short', timeStyle: 'short' }).format(d);
 }
 
-function displayName(e: any) {
-  return (e.fullName as string) || [e.lastName, e.firstName, e.middleName].filter(Boolean).join(' ') || 'Сотрудник';
-}
-
+// 1️⃣ Ровно один раз «за час» без reminded1hAt: через уникальную запись в Notification
 export async function runMeets1hOnce() {
   const now = Date.now();
+  const target = new Date(now + 60 * 60 * 1000);
+  // Небольшое окно, чтобы один раз поймать «ровно за час»
+  const from = new Date(target.getTime() - 90 * 1000);
+  const to   = new Date(target.getTime() + 90 * 1000);
 
   const subs = await Subscriber.find({ enabled: true }).lean();
   if (!subs.length) return { checked: 0, matched: 0, delivered: 0, items: [], note: 'no subscribers' };
 
+  // Берём только «шапку» интервью и сразу фильтруем по окну
   const candidates = await Candidate.find(
-    { 'interviews.0.scheduledAt': { $exists: true } },
+    { 'interviews.0.scheduledAt': { $gte: from, $lte: to } },
     { fullName: 1, email: 1, interviews: { $slice: 1 } }
   ).lean();
 
@@ -43,7 +46,7 @@ export async function runMeets1hOnce() {
   const items: Array<{ id: string; when: string; name: string; sent: boolean }> = [];
 
   for (const c of candidates) {
-    const head = Array.isArray(c.interviews) ? (c.interviews[0] as any) : null;
+    const head: any = Array.isArray(c.interviews) ? c.interviews[0] : null;
     if (!head?.scheduledAt) continue;
 
     const when = new Date(head.scheduledAt);
@@ -51,30 +54,34 @@ export async function runMeets1hOnce() {
 
     checked++;
 
-    const diffSec = (when.getTime() - now) / 1000;
-    if (diffSec >= 60 * 60 - 90 && diffSec <= 60 * 60 + 90) {
-      const upd = await Candidate.updateOne(
-        { _id: c._id },
-        {
-          $set: { 'interviews.$[head].reminded1hAt': new Date().toISOString() }
-        },
-        {
-          arrayFilters: [{ 'head.scheduledAt': head.scheduledAt }],
-          strict: false
-        }
-      );
-
-      let sent = false;
-      if (upd.modifiedCount === 1) {
-        matched++;
-        const label = (c as any).fullName || (c as any).email || `Кандидат ${c._id}`;
-        const link  = head.meetLink ? `\n${head.meetLink}` : '';
-        const text  = `⏰ Через 1 час звонок:\n• ${fmtKyiv(when)} — ${label}${link}`;
-        for (const s of subs) { try { await sendTelegram(s.chatId, text); sent = true; delivered++; } catch {} }
-      }
-
-      items.push({ id: String(c._id), when: when.toISOString(), name: (c as any).fullName || (c as any).email || '', sent });
+    // Идемпотентный маркер (уникальный ключ): один раз на (candidateId, scheduledAt, 'meet_1h')
+    const expiresAt = new Date(when.getTime() + 3 * 60 * 60 * 1000); // запас
+    try {
+      await Notification.create({
+        scope: 'crm',
+        candidateId: c._id,
+        scheduledAt: when,
+        kind: 'meet_1h',
+        expiresAt,
+      });
+    } catch (e: any) {
+      // E11000 — уже вставляли → пропускаем повторную отправку
+      if (e && e.code === 11000) continue;
+      throw e;
     }
+
+    matched++;
+
+    const label = (c as any).fullName || (c as any).email || `Кандидат ${c._id}`;
+    const link  = head.meetLink ? `\n${head.meetLink}` : '';
+    const text  = `⏰ Через 1 час звонок:\n• ${fmtKyiv(when)} — ${label}${link}`;
+
+    let sent = false;
+    for (const s of subs) {
+      try { await sendTelegram(s.chatId, text); sent = true; delivered++; } catch {}
+    }
+
+    items.push({ id: String(c._id), when: when.toISOString(), name: label, sent });
   }
 
   const summary = { checked, matched, delivered, items };
@@ -83,6 +90,9 @@ export async function runMeets1hOnce() {
 }
 
 export function startSchedulers() {
+  // гарантируем индексы (unique + TTL) для Notification
+  Notification.syncIndexes().catch(() => {});
+
   let last09Key = '';
   let last12Key = '';
 
@@ -135,4 +145,8 @@ async function notifyBirthdaysIn7Days() {
   const list = soon.map(displayName).map(n => `• ${n}`).join('\n');
   const text = `📅 Ровно через неделю день рождения:\n${list}`;
   for (const s of subs) { try { await sendTelegram(s.chatId, text); } catch {} }
+}
+
+function displayName(e: any) {
+  return (e.fullName as string) || [e.lastName, e.firstName, e.middleName].filter(Boolean).join(' ') || 'Сотрудник';
 }

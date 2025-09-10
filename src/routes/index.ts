@@ -5,6 +5,7 @@ import { webhooksRouter } from './webhooks.routes';
 import { candidatesRouter } from './candidates.routes';
 import { employeesRouter } from './employees.routes';
 import { meetRouter } from './meet.routes';
+import { candidatesMeetMaintainRouter } from './candidates.meet.maintain.routes';
 
 export const apiRouter = Router();
 
@@ -14,3 +15,4 @@ apiRouter.use(healthRouter);
 apiRouter.use(telegramRouter);
 apiRouter.use(webhooksRouter);
 apiRouter.use(meetRouter);
+apiRouter.use(candidatesMeetMaintainRouter);
