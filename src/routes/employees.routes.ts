@@ -10,6 +10,7 @@ const DepartmentEnum = z.enum([
 ]);
 const PositionEnum = z.enum([
   "Head","TeamLead","Buyer","Designer","Accountant","Administrator","CTO","Translator","Frontend",
+  "FarmerTech",
 ]);
 
 const normEmail = (e: string) => e.trim().toLowerCase();

@@ -23,7 +23,7 @@ const InterviewDTO = z.object({
 
 const DepartmentEnum = z.enum(["Gambling","Sweeps","Search","Vitehi","Tech","TechaDeals","Admin"]);
 const PositionEnum = z.enum([
-  "Head","TeamLead","Buyer","Designer","Accountant","Administrator","CTO","Translator","Frontend",
+  "Head","TeamLead","Buyer","Designer","Accountant","Administrator","CTO","Translator","Frontend","FarmerTech",
 ]);
 
 const StatusEnum = z.enum(["not_held","reserve","success","declined","canceled"]);

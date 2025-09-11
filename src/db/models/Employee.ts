@@ -14,7 +14,18 @@ const employeeSchema = new Schema(
     },
     position: {
       type: String,
-      enum: ["Head", "TeamLead", "Buyer", "Designer", "Accountant", "Administrator", "CTO", "Translator", "Frontend"],
+      enum: [
+        "Head",
+        "TeamLead",
+        "Buyer",
+        "Designer",
+        "Accountant",
+        "Administrator",
+        "CTO",
+        "Translator",
+        "Frontend",
+        "FarmerTech",
+      ],
       default: null
     },
     notes: { type: String, default: "" },

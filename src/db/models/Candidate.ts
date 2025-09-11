@@ -48,6 +48,7 @@ const candidateSchema = new Schema(
         "CTO",
         "Translator",
         "Frontend",
+        "FarmerTech",
       ],
       default: null,
       set: (v: any) => (v === "" ? null : v),
